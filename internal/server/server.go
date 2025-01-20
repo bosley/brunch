@@ -159,13 +159,13 @@ func (s *Server) handleQuery(c fuego.ContextWithBody[api.BrunchQueryRequest]) (a
 		response.Code = http.StatusBadRequest
 		return response, err
 	}
-	_, err = s.validateToken(b.Token)
+	claims, err := s.validateToken(b.Token)
 	if err != nil {
 		response.Code = http.StatusUnauthorized
 		response.Message = "Invalid token"
 		return response, err
 	}
-	return s.executeQuery(b.Query)
+	return s.executeQuery(claims.Username, b.Op, b.Key, b.Value)
 }
 
 func (s *Server) ServeForever() error {
@@ -192,11 +192,11 @@ func (s *Server) handleAdminRequest(c fuego.ContextWithBody[api.BrunchAdminReque
 
 	var opErr error
 	switch b.Op {
-	case api.BranchOpCreate:
+	case api.BrunchOpCreate:
 		response.Code, opErr = s.createUser(b.Username, b.Password)
-	case api.BranchOpUpdate:
+	case api.BrunchOpUpdate:
 		response.Code, opErr = s.updateUser(b.Username, b.Password)
-	case api.BranchOpDelete:
+	case api.BrunchOpDelete:
 		response.Code, opErr = s.deleteUser(b.Username, b.Password)
 	default:
 		response.Code = http.StatusBadRequest

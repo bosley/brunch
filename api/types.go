@@ -17,32 +17,34 @@ type BrunchAuthResponse struct {
 	Message string `json:"message"`
 }
 
-type BrunchQueryRequest struct {
-	Token string `json:"token"`
-	Query string `json:"query"`
-}
-
-type BrunchQueryResponse struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Result  string `json:"result"`
-}
-
-type BrunchUserOp string
+type BrunchOp string
 
 const (
-	BranchOpCreate BrunchUserOp = "create"
-	BranchOpUpdate BrunchUserOp = "update"
-	BranchOpDelete BrunchUserOp = "delete"
+	BrunchOpCreate BrunchOp = "create"
+	BrunchOpUpdate BrunchOp = "update"
+	BrunchOpDelete BrunchOp = "delete"
 )
 
 type BrunchAdminRequest struct {
 	SecretKey string `json:"key"`
-	Op        BrunchUserOp
+	Op        BrunchOp
 	Username  string `json:"username"`
 	Password  string `json:"password"`
 }
 
 type BrunchAdminResponse struct {
 	Code int `json:"code"`
+}
+
+type BrunchQueryRequest struct {
+	Token string `json:"token"`
+	Op    BrunchOp
+	Key   string `json:"key"`
+	Value string `json:"value,omitempty"`
+}
+
+type BrunchQueryResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Result  string `json:"result"`
 }
