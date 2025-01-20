@@ -22,8 +22,7 @@ type Server struct {
 	secretKey string
 	logger    *slog.Logger
 	tlsPaths  *Https
-
-	kvs *KVS
+	kvs       *KVS
 }
 
 type Https struct {
@@ -59,6 +58,9 @@ func New(opts Opts) (*Server, error) {
 		secretKey: opts.SecretKey,
 		logger:    opts.Logger.WithGroup("brunch"),
 		tlsPaths:  opts.TLSPaths,
+		fServer: fuego.NewServer(
+			fuego.WithAddr(opts.Binding),
+		),
 	}
 
 	fuego.Post(s.fServer, "/api/v1/auth", s.handleAuth,
