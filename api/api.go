@@ -66,5 +66,54 @@ func NewWithPassword(address, username, password string, opts Opts) (*ApiClient,
 		token:      authResp.Token,
 		skipVerify: opts.SkipVerify,
 		https:      opts.Https,
+		address:    address,
 	}, nil
+}
+
+func (c *ApiClient) Query(op BrunchOp, key, value string) (BrunchQueryResponse, error) {
+	client := &http.Client{}
+
+	if c.https {
+		tr := &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: c.skipVerify,
+			},
+		}
+		client = &http.Client{Transport: tr}
+	}
+
+	queryReq := BrunchQueryRequest{
+		Token: c.token,
+		Op:    op,
+		Key:   key,
+		Value: value,
+	}
+
+	jsonData, err := json.Marshal(queryReq)
+	if err != nil {
+		return BrunchQueryResponse{}, fmt.Errorf("failed to marshal query request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/v1/brunch", c.address), bytes.NewBuffer(jsonData))
+	if err != nil {
+		return BrunchQueryResponse{}, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return BrunchQueryResponse{}, fmt.Errorf("failed to send query request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var queryResp BrunchQueryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&queryResp); err != nil {
+		return BrunchQueryResponse{}, fmt.Errorf("failed to decode query response: %w", err)
+	}
+
+	if queryResp.Code != http.StatusOK && queryResp.Code != http.StatusCreated {
+		return queryResp, fmt.Errorf("query failed: %s", queryResp.Message)
+	}
+
+	return queryResp, nil
 }

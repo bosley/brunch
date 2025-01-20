@@ -4,6 +4,7 @@ type ApiClient struct {
 	token      string
 	skipVerify bool
 	https      bool
+	address    string
 }
 
 type BrunchAuthRequest struct {
@@ -23,6 +24,7 @@ const (
 	BrunchOpCreate BrunchOp = "create"
 	BrunchOpUpdate BrunchOp = "update"
 	BrunchOpDelete BrunchOp = "delete"
+	BrunchOpRead   BrunchOp = "read"
 )
 
 type BrunchAdminRequest struct {

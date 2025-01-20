@@ -15,6 +15,16 @@ func (s *Server) executeQuery(username string, op api.BrunchOp, key string, valu
 	}
 
 	switch op {
+	case api.BrunchOpRead:
+		value, err := s.kvs.GetUserData(username, key)
+		if err != nil {
+			response.Message = fmt.Sprintf("Failed to read data: %v", err)
+			return response, err
+		}
+		response.Code = http.StatusOK
+		response.Message = "SUCCESS"
+		response.Result = value
+
 	case api.BrunchOpCreate:
 		err := s.kvs.SetUserData(username, key, value)
 		if err != nil {

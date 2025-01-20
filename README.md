@@ -14,7 +14,7 @@ A configurable REPL interface for AI model interactions, with conversation state
 0. Build the example:
 
 ```bash
-go build ./examples/basic 
+go build ./examples/basic
 ```
 
 1. Set your API key:
@@ -30,10 +30,10 @@ export ANTHROPIC_API_KEY='your-key-here'
 
 3. Start the REPL:
 ```bash
-./basic -load . 
+./basic -load .
 ```
 
-or 
+or
 
 ```bash
 ./basic
@@ -55,3 +55,10 @@ is tied to the library itself. The example is just a simple way to get started.
 ## License
 
 See LICENSE file for details.
+
+## Tests:
+
+```bash
+go test -v -bench=KVS ./internal/server
+go test -v ./internal/server
+```

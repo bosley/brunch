@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/bosley/brunch"
 	"github.com/bosley/brunch/api"
 	"github.com/go-fuego/fuego"
 	"github.com/go-fuego/fuego/option"
@@ -17,7 +16,6 @@ import (
 
 type Server struct {
 	fServer   *fuego.Server
-	provider  brunch.Provider
 	jwtSecret string
 	secretKey string
 	logger    *slog.Logger
@@ -32,7 +30,6 @@ type Https struct {
 
 type Opts struct {
 	Binding       string
-	Provider      brunch.Provider
 	JWTSecret     string
 	SecretKey     string
 	Logger        *slog.Logger
@@ -53,7 +50,6 @@ func New(opts Opts) (*Server, error) {
 	}
 
 	s := &Server{
-		provider:  opts.Provider,
 		jwtSecret: opts.JWTSecret,
 		secretKey: opts.SecretKey,
 		logger:    opts.Logger.WithGroup("brunch"),
