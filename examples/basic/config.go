@@ -17,7 +17,7 @@ const (
 	DefaultMaxTokens    = 4096
 	DefaultTemperature  = 0.7
 	DefaultSystemPrompt = "prompts/sp-think.xml"
-	DefaultConfigName   = "branch.yaml"
+	DefaultConfigName   = "brunch.yaml"
 )
 
 type AvailableProviders string

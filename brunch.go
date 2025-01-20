@@ -89,8 +89,9 @@ func (m *MessagePairNode) Hash() string {
 }
 
 type MessageData struct {
-	Role              string `json:"role"`
-	B64EncodedContent string `json:"b64_encoded_content"`
+	Role              string   `json:"role"`
+	B64EncodedContent string   `json:"b64_encoded_content"`
+	Images            []string `json:"images,omitempty"`
 }
 
 func NewRootNode(opts RootOpt) *RootNode {
@@ -144,7 +145,11 @@ func (m *Node) History() []string {
 
 	result := make([]string, len(messages))
 	for i, msg := range messages {
-		result[i] = messageToString(&msg)
+		if msg.Images != nil {
+			result[i] = messageToStringWithImages(&msg, msg.Images)
+		} else {
+			result[i] = messageToString(&msg)
+		}
 	}
 	return result
 }

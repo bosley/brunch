@@ -1,5 +1,7 @@
 package anthropic
 
+// TODO: Work this into brunch so they can define callbacks and tools and whatnot
+
 import (
 	"encoding/base64"
 	"encoding/json"

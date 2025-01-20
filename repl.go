@@ -218,7 +218,16 @@ func (r *Repl) PrintHistory() string {
 	switch r.currentNode.Type() {
 	case NT_MESSAGE_PAIR:
 		if mp, ok := r.currentNode.(*MessagePairNode); ok && mp.Parent != nil {
-			result = append(result, messageToString(mp.User), messageToString(mp.Assistant))
+			if len(mp.User.Images) > 0 {
+				result = append(result, messageToStringWithImages(mp.User, mp.User.Images))
+			} else {
+				result = append(result, messageToString(mp.User))
+			}
+			if len(mp.Assistant.Images) > 0 {
+				result = append(result, messageToStringWithImages(mp.Assistant, mp.Assistant.Images))
+			} else {
+				result = append(result, messageToString(mp.Assistant))
+			}
 		}
 	}
 	return strings.Join(result, "\n")

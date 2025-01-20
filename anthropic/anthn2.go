@@ -62,20 +62,25 @@ func (ap *AnthropicProvider) ExtendFrom(node brunch.NttNode) brunch.MessageCreat
 
 		var resp string
 		var err error
+		var usedImages []string
 
 		if len(ap.pendingImages) > 0 {
+			usedImages = ap.pendingImages
 			resp, err = localClient.AskWithImage(userMessage, ap.pendingImages)
-			ap.pendingImages = []string{}
 		} else {
 			resp, err = localClient.Ask(userMessage)
 		}
-		ap.pendingImages = []string{}
 
 		if err != nil {
 			return nil, err
 		}
 		msgPair.User = brunch.NewMessageData("user", userMessage)
 		msgPair.Assistant = brunch.NewMessageData("assistant", resp)
+
+		if len(usedImages) > 0 {
+			msgPair.User.Images = usedImages
+		}
+		ap.pendingImages = []string{}
 		return msgPair, nil
 	}
 }

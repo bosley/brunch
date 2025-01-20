@@ -40,10 +40,20 @@ func PrettyPrint(node NttNode, indent string, isLastChild bool) string {
 		}
 		sb.WriteString(fmt.Sprintf("%s%s [MESSAGE_PAIR] Time: %s\n", nodeIndent, prefix, n.Time.Format("2006-01-02 15:04:05")))
 		if n.User != nil {
-			sb.WriteString(fmt.Sprintf("%s    ├── User (%s): %s\n", nodeIndent, n.User.Role, contentPreview(n.User.UnencodedContent())))
+			if len(n.User.Images) > 0 {
+				sb.WriteString(fmt.Sprintf("%s    ├── User (%s): %s\n", nodeIndent, n.User.Role, contentPreview(n.User.UnencodedContent())))
+				sb.WriteString(fmt.Sprintf("%s    ├── User Images: %s\n", nodeIndent, strings.Join(n.User.Images, ", ")))
+			} else {
+				sb.WriteString(fmt.Sprintf("%s    ├── User (%s): %s\n", nodeIndent, n.User.Role, contentPreview(n.User.UnencodedContent())))
+			}
 		}
 		if n.Assistant != nil {
-			sb.WriteString(fmt.Sprintf("%s    ├── Assistant (%s): %s\n", nodeIndent, n.Assistant.Role, contentPreview(n.Assistant.UnencodedContent())))
+			if len(n.Assistant.Images) > 0 {
+				sb.WriteString(fmt.Sprintf("%s    ├── Assistant (%s): %s\n", nodeIndent, n.Assistant.Role, contentPreview(n.Assistant.UnencodedContent())))
+				sb.WriteString(fmt.Sprintf("%s    ├── Assistant Images: %s\n", nodeIndent, strings.Join(n.Assistant.Images, ", ")))
+			} else {
+				sb.WriteString(fmt.Sprintf("%s    ├── Assistant (%s): %s\n", nodeIndent, n.Assistant.Role, contentPreview(n.Assistant.UnencodedContent())))
+			}
 		}
 		sb.WriteString(fmt.Sprintf("%s    └── Hash: %s\n", nodeIndent, n.Hash()))
 		if len(n.Children) > 0 {
@@ -65,6 +75,6 @@ func messageToString(message *MessageData) string {
 	return fmt.Sprintf("%s: %s", message.Role, message.UnencodedContent())
 }
 
-func messagePairToString(messagePair *MessagePairNode) string {
-	return fmt.Sprintf("%s: %s", messagePair.User.UnencodedContent(), messagePair.Assistant.UnencodedContent())
+func messageToStringWithImages(message *MessageData, images []string) string {
+	return fmt.Sprintf("%s: %s [%d images]: %s", message.Role, message.UnencodedContent(), len(images), strings.Join(images, ", "))
 }
