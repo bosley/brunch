@@ -66,7 +66,6 @@ func InitDirectory(dir string) error {
 		os.Exit(1)
 	}
 
-	// Create default config
 	defaultConfig := Config{
 		SelectedProvider: ProviderAnthropicChat,
 		Providers: map[AvailableProviders]Provider{
@@ -79,13 +78,11 @@ func InitDirectory(dir string) error {
 		},
 	}
 
-	// Marshal config to YAML
 	yamlData, err := yaml.Marshal(defaultConfig)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// Write config file
 	if err := os.WriteFile(configPath, yamlData, 0644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
@@ -96,24 +93,20 @@ func InitDirectory(dir string) error {
 func LoadFromDir(dir string) (*Config, error) {
 	configPath := filepath.Join(dir, DefaultConfigName)
 
-	// Read config file
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	// Parse YAML
 	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	// Validate the config
 	if len(config.Providers) == 0 {
 		return nil, fmt.Errorf("no providers configured in config file")
 	}
 
-	// Ensure each provider has required fields
 	for name, provider := range config.Providers {
 		if provider.Name != name {
 			return nil, fmt.Errorf("provider name mismatch: %s != %s", provider.Name, name)
