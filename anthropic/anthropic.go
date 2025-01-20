@@ -210,7 +210,6 @@ func (c *Client) Ask(question string) (string, error) {
 func (c *Client) AskWithImage(question string, imagePaths []string) (string, error) {
 	content := make([]MessagePart, 0, len(imagePaths)+1)
 
-	// Add images first
 	for _, path := range imagePaths {
 		imageData, err := os.ReadFile(path)
 		if err != nil {
@@ -227,9 +226,17 @@ func (c *Client) AskWithImage(question string, imagePaths []string) (string, err
 			mediaType = "image/gif"
 		case ".webp":
 			mediaType = "image/webp"
+		case ".b64":
+			mediaType = "image/b64"
+		case ".url":
+			mediaType = "image/url"
 		}
 
 		encoded := base64.StdEncoding.EncodeToString(imageData)
+
+		if mediaType == "image/b64" {
+			encoded = string(imageData)
+		}
 
 		content = append(content, MessagePart{
 			Type: "image",
@@ -251,11 +258,9 @@ func (c *Client) AskWithImage(question string, imagePaths []string) (string, err
 		Text: question,
 	})
 
-	messages := []apiMessage{{
-		Role:    "user",
-		Content: content,
-	}}
+	messages := []apiMessage{}
 
+	// Add historical messages first if they exist
 	if len(c.conversations) > 0 {
 		historicalMessages := make([]apiMessage, len(c.conversations))
 		for i, msg := range c.conversations {
@@ -269,8 +274,14 @@ func (c *Client) AskWithImage(question string, imagePaths []string) (string, err
 				Content: msg.Content,
 			}
 		}
-		messages = append(historicalMessages, messages...)
+		messages = append(messages, historicalMessages...)
 	}
+
+	// Add the current message with image
+	messages = append(messages, apiMessage{
+		Role:    "user",
+		Content: content,
+	})
 
 	reqBody := apiRequest{
 		Model:       c.model,

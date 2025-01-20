@@ -33,6 +33,7 @@ type NttReplPanel interface {
 	PrintHistory() string
 	GetRoutes() map[string]string
 	TraverseToRoute(route string) error
+	QueueImages(paths []string) error
 }
 
 // Called when a command is entered
@@ -79,6 +80,8 @@ type Repl struct {
 	currentNode NttNode
 
 	done chan bool
+
+	enqueueImages []string
 }
 
 // Obviously to create a repl..
@@ -162,6 +165,11 @@ func (r *Repl) Run() {
 					fmt.Println("Failed to run preHook", err)
 					continue
 				}
+			}
+
+			if len(r.enqueueImages) > 0 {
+				r.provider.QueueImages(r.enqueueImages)
+				r.enqueueImages = []string{}
 			}
 
 			creator := r.provider.ExtendFrom(r.currentNode)
@@ -267,5 +275,10 @@ func (r *Repl) TraverseToRoute(route string) error {
 			}
 		}
 	}
+	return nil
+}
+
+func (r *Repl) QueueImages(paths []string) error {
+	r.enqueueImages = append(r.enqueueImages, paths...)
 	return nil
 }

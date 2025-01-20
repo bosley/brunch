@@ -93,6 +93,14 @@ func handleCommand(panel brunch.NttReplPanel, nodeHash, line string) error {
 		if err := panel.TraverseToRoute(routes[route]); err != nil {
 			fmt.Println("Failed to traverse to route:", err)
 		}
+
+	case "\\i":
+		fmt.Println("Enter image path:")
+		var imagePath string
+		fmt.Scanln(&imagePath)
+		if err := panel.QueueImages([]string{imagePath}); err != nil {
+			fmt.Println("Failed to queue image:", err)
+		}
 	}
 	return nil
 }

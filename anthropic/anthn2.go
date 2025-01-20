@@ -7,13 +7,15 @@ import (
 )
 
 type AnthropicProvider struct {
-	client *Client
+	client        *Client
+	pendingImages []string
 }
 
 // NewAnthropicProvider creates a new brunch provider for Anthropic
 func NewAnthropicProvider(client *Client) *AnthropicProvider {
 	return &AnthropicProvider{
-		client: client,
+		client:        client,
+		pendingImages: []string{},
 	}
 }
 
@@ -57,7 +59,18 @@ func (ap *AnthropicProvider) ExtendFrom(node brunch.NttNode) brunch.MessageCreat
 				Content: msg["content"],
 			})
 		}
-		resp, err := localClient.Ask(userMessage)
+
+		var resp string
+		var err error
+
+		if len(ap.pendingImages) > 0 {
+			resp, err = localClient.AskWithImage(userMessage, ap.pendingImages)
+			ap.pendingImages = []string{}
+		} else {
+			resp, err = localClient.Ask(userMessage)
+		}
+		ap.pendingImages = []string{}
+
 		if err != nil {
 			return nil, err
 		}
@@ -123,4 +136,9 @@ func (ap *AnthropicProvider) GetHistory(node brunch.NttNode) []map[string]string
 	}
 
 	return history
+}
+
+func (ap *AnthropicProvider) QueueImages(paths []string) error {
+	ap.pendingImages = append(ap.pendingImages, paths...)
+	return nil
 }

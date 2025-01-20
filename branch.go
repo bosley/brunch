@@ -16,6 +16,7 @@ type NttProvider interface {
 	ExtendFrom(NttNode) MessageCreator
 	GetRoot(NttNode) RootNode
 	GetHistory(NttNode) []map[string]string
+	QueueImages([]string) error
 }
 
 const (
