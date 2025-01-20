@@ -31,11 +31,10 @@ func (ap *AnthropicProvider) NewNett() brunch.RootNode {
 }
 
 // ExtendFrom creates a new message pair node from the given node
-func (ap *AnthropicProvider) ExtendFrom(node brunch.NttNode) brunch.MessageCreator {
+func (ap *AnthropicProvider) ExtendFrom(node brunch.Node) brunch.MessageCreator {
 
-	// Create a new message pair node
 	msgPair := &brunch.MessagePairNode{
-		Node: brunch.Node{
+		NodeImpl: brunch.NodeImpl{
 			Type:   brunch.NT_MESSAGE_PAIR,
 			Parent: node,
 		},
@@ -86,7 +85,7 @@ func (ap *AnthropicProvider) ExtendFrom(node brunch.NttNode) brunch.MessageCreat
 }
 
 // GetRoot traverses up the node tree to find the root node
-func (ap *AnthropicProvider) GetRoot(node brunch.NttNode) brunch.RootNode {
+func (ap *AnthropicProvider) GetRoot(node brunch.Node) brunch.RootNode {
 	current := node
 	for {
 		if current.Type() == brunch.NT_ROOT {
@@ -111,7 +110,7 @@ func (ap *AnthropicProvider) GetRoot(node brunch.NttNode) brunch.RootNode {
 }
 
 // GetHistory returns the conversation history as a slice of message maps
-func (ap *AnthropicProvider) GetHistory(node brunch.NttNode) []map[string]string {
+func (ap *AnthropicProvider) GetHistory(node brunch.Node) []map[string]string {
 	var history []map[string]string
 	current := node
 

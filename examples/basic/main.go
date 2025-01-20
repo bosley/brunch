@@ -38,7 +38,7 @@ func main() {
 
 	client := clientFromSelectedProvider(config)
 
-	brunch.NewRepl(brunch.ReplOpts{
+	brunch.NewRepl(brunch.PanelOpts{
 		Provider:          client,
 		PreHook:           preHook,
 		PostHook:          postHook,
@@ -61,16 +61,16 @@ func postHook(response *string) error {
 	return nil
 }
 
-func interruptHandler(node brunch.NttNode) {
+func interruptHandler(node brunch.Node) {
 	fmt.Println("InterruptHandler", brunch.PrintTree(node))
 }
 
-func completionHandler(node brunch.NttNode) {
+func completionHandler(node brunch.Node) {
 	fmt.Println("CompletionHandler", brunch.PrintTree(node))
 
 }
 
-func handleCommand(panel brunch.NttReplPanel, nodeHash, line string) error {
+func handleCommand(panel brunch.Panel, nodeHash, line string) error {
 	fmt.Printf("handleCommand: %s\n", line)
 
 	parts := strings.Split(line, " ")

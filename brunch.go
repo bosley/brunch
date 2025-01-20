@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -11,11 +12,11 @@ import (
 
 type NodeTyppe string
 
-type NttProvider interface {
+type Provider interface {
 	NewNett() RootNode
-	ExtendFrom(NttNode) MessageCreator
-	GetRoot(NttNode) RootNode
-	GetHistory(NttNode) []map[string]string
+	ExtendFrom(Node) MessageCreator
+	GetRoot(Node) RootNode
+	GetHistory(Node) []map[string]string
 	QueueImages([]string) error
 }
 
@@ -24,7 +25,7 @@ const (
 	NT_MESSAGE_PAIR NodeTyppe = "message_pair"
 )
 
-type NttNode interface {
+type Node interface {
 	Type() NodeTyppe
 	Hash() string
 	ToString() string
@@ -34,15 +35,15 @@ type NttNode interface {
 // Provider must create a function that the user can call to create a new message pair node
 type MessageCreator func(userMessage string) (*MessagePairNode, error)
 
-type Node struct {
+type NodeImpl struct {
 	Type NodeTyppe `json:"type"`
 
-	Parent   NttNode   `json:"parent,omitempty"`
-	Children []NttNode `json:"children,omitempty"`
+	Parent   Node   `json:"parent,omitempty"`
+	Children []Node `json:"children,omitempty"`
 }
 
 type RootNode struct {
-	Node
+	NodeImpl
 	Provider    string  `json:"provider"`
 	Model       string  `json:"model"`
 	Prompt      string  `json:"prompt"`
@@ -69,7 +70,7 @@ type RootOpt struct {
 }
 
 type MessagePairNode struct {
-	Node
+	NodeImpl
 	Assistant *MessageData `json:"assistant"`
 	User      *MessageData `json:"user"`
 	Time      time.Time    `json:"time"`
@@ -96,7 +97,7 @@ type MessageData struct {
 
 func NewRootNode(opts RootOpt) *RootNode {
 	root := &RootNode{
-		Node:        Node{Type: NT_ROOT},
+		NodeImpl:    NodeImpl{Type: NT_ROOT},
 		Provider:    opts.Provider,
 		Model:       opts.Model,
 		Prompt:      opts.Prompt,
@@ -125,7 +126,7 @@ func (m *MessageData) updateContent(content string) {
 	m.B64EncodedContent = base64.StdEncoding.EncodeToString([]byte(content))
 }
 
-func (m *Node) History() []string {
+func (m *NodeImpl) History() []string {
 	messages := []MessageData{}
 
 	if m.Parent != nil {
@@ -154,7 +155,7 @@ func (m *Node) History() []string {
 	return result
 }
 
-func (m *Node) ToString() string {
+func (m *NodeImpl) ToString() string {
 	if m.Type == NT_MESSAGE_PAIR {
 		if mp, ok := interface{}(m).(*MessagePairNode); ok {
 			return fmt.Sprintf("User: %s\nAssistant: %s", mp.User.UnencodedContent(), mp.Assistant.UnencodedContent())
@@ -163,7 +164,7 @@ func (m *Node) ToString() string {
 	return fmt.Sprintf("Node: %s", m.Type)
 }
 
-func historyFromNode(node NttNode, list []MessageData) []MessageData {
+func historyFromNode(node Node, list []MessageData) []MessageData {
 	if node == nil {
 		return list
 	}
@@ -180,4 +181,42 @@ func historyFromNode(node NttNode, list []MessageData) []MessageData {
 		}
 	}
 	return list
+}
+
+func MarshalNode(node Node) ([]byte, error) {
+	if node == nil {
+		return nil, fmt.Errorf("cannot marshal nil node")
+	}
+	switch n := node.(type) {
+	case *RootNode:
+		return json.Marshal(n)
+	case *MessagePairNode:
+		return json.Marshal(n)
+	default:
+		return nil, fmt.Errorf("unknown node type: %s", node.Type())
+	}
+}
+
+func UnmarshalNode(data []byte) (Node, error) {
+	var base NodeImpl
+	if err := json.Unmarshal(data, &base); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal node type: %w", err)
+	}
+
+	switch base.Type {
+	case NT_ROOT:
+		var root RootNode
+		if err := json.Unmarshal(data, &root); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal root node: %w", err)
+		}
+		return &root, nil
+	case NT_MESSAGE_PAIR:
+		var msg MessagePairNode
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal message pair node: %w", err)
+		}
+		return &msg, nil
+	default:
+		return nil, fmt.Errorf("unknown node type: %s", base.Type)
+	}
 }

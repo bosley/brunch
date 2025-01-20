@@ -28,7 +28,7 @@ const (
 // A "Control panel" handed to the user that called on the repl
 // to allow them to change how they interact with the message set
 // on the actual human interface
-type NttReplPanel interface {
+type Panel interface {
 	PrintTree() string
 	PrintHistory() string
 	GetRoutes() map[string]string
@@ -40,7 +40,7 @@ type NttReplPanel interface {
 // If error is returned, it will be displayed to the user
 // and the command will not be entered, and the message will
 // not be added to the tree
-type CommandHandler func(panel NttReplPanel, nodeHash, line string) error
+type CommandHandler func(panel Panel, nodeHash, line string) error
 
 // CommandOpts is the set of commands that will be available to the user, supplied by
 // program external to this library. We supply this so user can change the repl key trigger
@@ -58,26 +58,26 @@ type CommandOpts struct {
 // Commands is the set of commands that will be available to the user
 // InterruptHandler is a function that will be called when the user interrupts the repl
 // CompletionHandler is a function that will be called when the repl is complete from some other source
-type ReplOpts struct {
-	Provider          NttProvider
+type PanelOpts struct {
+	Provider          Provider
 	PreHook           PreHook
 	PostHook          PostHook
 	Commands          CommandOpts
-	InterruptHandler  func(NttNode)
-	CompletionHandler func(NttNode)
+	InterruptHandler  func(Node)
+	CompletionHandler func(Node)
 }
 
 // The main struct that holds the state of the repl
 type Repl struct {
-	provider          NttProvider
+	provider          Provider
 	preHook           PreHook
 	postHook          PostHook
 	commands          CommandOpts
-	interruptHandler  func(NttNode)
-	completionHandler func(NttNode)
+	interruptHandler  func(Node)
+	completionHandler func(Node)
 
 	root        RootNode
-	currentNode NttNode
+	currentNode Node
 
 	done chan bool
 
@@ -85,7 +85,7 @@ type Repl struct {
 }
 
 // Obviously to create a repl..
-func NewRepl(opts ReplOpts) *Repl {
+func NewRepl(opts PanelOpts) *Repl {
 	return &Repl{
 		provider:          opts.Provider,
 		preHook:           opts.PreHook,

@@ -12,7 +12,7 @@ func contentPreview(content string) string {
 	return content
 }
 
-func PrettyPrint(node NttNode, indent string, isLastChild bool) string {
+func PrettyPrint(node Node, indent string, isLastChild bool) string {
 	var sb strings.Builder
 	nodeIndent := indent
 	if !isLastChild {
@@ -67,7 +67,7 @@ func PrettyPrint(node NttNode, indent string, isLastChild bool) string {
 	return sb.String()
 }
 
-func PrintTree(node NttNode) string {
+func PrintTree(node Node) string {
 	return PrettyPrint(node, "", true)
 }
 
