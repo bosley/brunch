@@ -34,6 +34,8 @@ type NttReplPanel interface {
 	GetRoutes() map[string]string
 	TraverseToRoute(route string) error
 	QueueImages(paths []string) error
+	MapTree() map[string]Node
+	Snapshot() ([]byte, error)
 }
 
 // Called when a command is entered
@@ -290,4 +292,12 @@ func (r *Repl) TraverseToRoute(route string) error {
 func (r *Repl) QueueImages(paths []string) error {
 	r.enqueueImages = append(r.enqueueImages, paths...)
 	return nil
+}
+
+func (r *Repl) MapTree() map[string]Node {
+	return MapTree(r.currentNode)
+}
+
+func (r *Repl) Snapshot() ([]byte, error) {
+	return marshalNode(&r.root)
 }

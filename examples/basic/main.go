@@ -77,6 +77,18 @@ func handleCommand(panel brunch.NttReplPanel, nodeHash, line string) error {
 		fmt.Println(panel.PrintHistory())
 	case "\\t":
 		fmt.Println(panel.PrintTree())
+	case "\\m":
+		m := panel.MapTree()
+		for k, v := range m {
+			fmt.Printf("%s: %s\n", k, v.ToString()) // NOTE TODO: This is only getting the current node and would not be sufficient to get the whole thign
+		}
+	case "\\s":
+		s, e := panel.Snapshot()
+		if e != nil {
+			fmt.Println("Failed to snapshot:", e)
+			break
+		}
+		fmt.Println(string(s))
 	case "\\r":
 		fmt.Println("Routes:")
 		routes := panel.GetRoutes()

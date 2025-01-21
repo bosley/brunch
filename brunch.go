@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -29,6 +30,7 @@ type Node interface {
 	Hash() string
 	ToString() string
 	History() []string
+	ToMap() map[string]Node
 }
 
 // Provider must create a function that the user can call to create a new message pair node
@@ -39,6 +41,14 @@ type node struct {
 
 	Parent   Node   `json:"parent,omitempty"`
 	Children []Node `json:"children,omitempty"`
+}
+
+func (n *node) ToMap() map[string]Node {
+	r := make(map[string]Node)
+	for _, child := range n.Children {
+		r[child.Hash()] = child
+	}
+	return r
 }
 
 type RootNode struct {
@@ -169,6 +179,10 @@ func (m *node) ToString() string {
 		if mp, ok := interface{}(m).(*MessagePairNode); ok {
 			return fmt.Sprintf("User: %s\nAssistant: %s", mp.User.UnencodedContent(), mp.Assistant.UnencodedContent())
 		}
+	} else if m.Type == NT_ROOT {
+		if rn, ok := interface{}(m).(*RootNode); ok {
+			return fmt.Sprintf("Root: %s", rn.Prompt)
+		}
 	}
 	return fmt.Sprintf("Node: %s", m.Type)
 }
@@ -190,4 +204,69 @@ func historyFromNode(node Node, list []MessageData) []MessageData {
 		}
 	}
 	return list
+}
+func marshalNode(node Node) ([]byte, error) {
+	type nodeWrapper struct {
+		NodeData Node            `json:"node_data"`
+		Children map[string]Node `json:"children"`
+	}
+
+	wrapper := nodeWrapper{
+		NodeData: node,
+		Children: node.ToMap(),
+	}
+
+	return json.Marshal(wrapper)
+}
+
+func unmarshalNode(data []byte) (Node, error) {
+	var wrapper struct {
+		NodeData struct {
+			Type NodeTyppe `json:"type"`
+		} `json:"node_data"`
+		Children map[string]json.RawMessage `json:"children"`
+	}
+
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return nil, err
+	}
+
+	var result Node
+
+	switch wrapper.NodeData.Type {
+	case NT_ROOT:
+		var root RootNode
+		if err := json.Unmarshal(data, &root); err != nil {
+			return nil, err
+		}
+		result = &root
+	case NT_MESSAGE_PAIR:
+		var msgPair MessagePairNode
+		if err := json.Unmarshal(data, &msgPair); err != nil {
+			return nil, err
+		}
+		result = &msgPair
+	default:
+		return nil, fmt.Errorf("unknown node type: %s", wrapper.NodeData.Type)
+	}
+
+	// Recursively unmarshal children
+	if len(wrapper.Children) > 0 {
+		children := make([]Node, 0)
+		for _, childData := range wrapper.Children {
+			child, err := unmarshalNode(childData)
+			if err != nil {
+				return nil, err
+			}
+			children = append(children, child)
+		}
+		switch n := result.(type) {
+		case *RootNode:
+			n.Children = children
+		case *MessagePairNode:
+			n.Children = children
+		}
+	}
+
+	return result, nil
 }
