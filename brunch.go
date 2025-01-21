@@ -224,12 +224,12 @@ func marshalNode(node Node) ([]byte, error) {
 	}
 
 	type nodeWrapper struct {
-		NodeData interface{}       `json:"node_data"`
-		Children map[string][]byte `json:"children"`
+		NodeData interface{}                `json:"node_data"`
+		Children map[string]json.RawMessage `json:"children"`
 	}
 
 	wrapper := nodeWrapper{
-		Children: make(map[string][]byte),
+		Children: make(map[string]json.RawMessage),
 	}
 
 	// Marshal children recursively
@@ -238,7 +238,7 @@ func marshalNode(node Node) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal child node: %w", err)
 		}
-		wrapper.Children[hash] = childData
+		wrapper.Children[hash] = json.RawMessage(childData)
 	}
 
 	// Marshal node data based on type

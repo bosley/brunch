@@ -6,9 +6,13 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/bosley/brunch"
 )
+
+var loadDir *string
+var restore *string
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -16,9 +20,11 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	loadDir := flag.String("load", ".", "Load directory containing insu.yaml")
+	loadDir = flag.String("load", ".", "Load directory containing insu.yaml")
+	restore = flag.String("snapshot", "", "Restore from snapshot")
 	flag.Parse()
 
+	var err error
 	config, err := LoadFromDir(*loadDir)
 	if err != nil {
 		if err := InitDirectory(*loadDir); err != nil {
@@ -34,7 +40,7 @@ func main() {
 
 	client := clientFromSelectedProvider(config)
 
-	brunch.NewRepl(brunch.ReplOpts{
+	brunchOpts := brunch.ReplOpts{
 		Provider:          client,
 		PreHook:           preHook,
 		PostHook:          postHook,
@@ -44,7 +50,27 @@ func main() {
 			KeyOn:   brunch.DefaultCommandKey,
 			Handler: handleCommand,
 		},
-	}).Run()
+	}
+
+	var repl *brunch.Repl
+	if *restore != "" {
+		snap, err := brunch.LoadSnapshot(*restore)
+		if err != nil {
+			fmt.Println("failed to load snapshot", err)
+			os.Exit(1)
+		}
+		repl, err = brunch.NewReplFromSnapshot(brunchOpts, snap)
+		if err != nil {
+			fmt.Println("failed to restore snapshot", err)
+			os.Exit(1)
+		}
+		fmt.Println("loaded snapshot")
+	} else {
+		repl = brunch.NewRepl(brunchOpts)
+		fmt.Println("new chat")
+	}
+
+	repl.Run()
 }
 
 func preHook(query *string) error {
@@ -66,48 +92,34 @@ func completionHandler(node brunch.Node) {
 
 }
 
-func handleCommand(panel brunch.NttReplPanel, nodeHash, line string) error {
+func handleCommand(panel brunch.Panel, nodeHash, line string) error {
 	fmt.Printf("handleCommand: %s\n", line)
 
 	parts := strings.Split(line, " ")
 	switch parts[0] {
-	case "\\h":
-		fmt.Printf("Current hash: [%s]", nodeHash)
 	case "\\l":
 		fmt.Println(panel.PrintHistory())
 	case "\\t":
 		fmt.Println(panel.PrintTree())
-	case "\\m":
-		m := panel.MapTree()
-		for k, v := range m {
-			fmt.Printf("%s: %s\n", k, v.ToString()) // NOTE TODO: This is only getting the current node and would not be sufficient to get the whole thign
-		}
-	case "\\s":
-		s, e := panel.Snapshot()
-		if e != nil {
-			fmt.Println("Failed to snapshot:", e)
-			break
-		}
-		fmt.Println(string(s))
-	case "\\r":
-		fmt.Println("Routes:")
-		routes := panel.GetRoutes()
-		for k, v := range routes {
-			fmt.Printf("%s: %s\n", k, v)
-		}
-		fmt.Println("Enter route key:")
-		var route string
-		fmt.Scanln(&route)
-		if err := panel.TraverseToRoute(routes[route]); err != nil {
-			fmt.Println("Failed to traverse to route:", err)
-		}
-
 	case "\\i":
 		fmt.Println("Enter image path:")
 		var imagePath string
 		fmt.Scanln(&imagePath)
 		if err := panel.QueueImages([]string{imagePath}); err != nil {
 			fmt.Println("Failed to queue image:", err)
+			return err
+		}
+	case "\\s":
+		snapshot, e := panel.Snapshot()
+		if e != nil {
+			fmt.Println("failed to take snapshot", e)
+			return e
+		}
+		// Create a snapshot file with timestamp
+		filename := fmt.Sprintf("snapshot-%d.json", time.Now().UnixMilli())
+		if err := snapshot.Save(filename); err != nil {
+			fmt.Println("failed to save snapshot", err)
+			return err
 		}
 	}
 	return nil

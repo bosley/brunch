@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 )
@@ -28,21 +27,18 @@ const (
 // A "Control panel" handed to the user that called on the repl
 // to allow them to change how they interact with the message set
 // on the actual human interface
-type NttReplPanel interface {
+type Panel interface {
 	PrintTree() string
 	PrintHistory() string
-	GetRoutes() map[string]string
-	TraverseToRoute(route string) error
 	QueueImages(paths []string) error
-	MapTree() map[string]Node
-	Snapshot() ([]byte, error)
+	Snapshot() (*Snapshot, error)
 }
 
 // Called when a command is entered
 // If error is returned, it will be displayed to the user
 // and the command will not be entered, and the message will
 // not be added to the tree
-type CommandHandler func(panel NttReplPanel, nodeHash, line string) error
+type CommandHandler func(panel Panel, nodeHash, line string) error
 
 // CommandOpts is the set of commands that will be available to the user, supplied by
 // program external to this library. We supply this so user can change the repl key trigger
@@ -96,6 +92,52 @@ func NewRepl(opts ReplOpts) *Repl {
 		interruptHandler:  opts.InterruptHandler,
 		completionHandler: opts.CompletionHandler,
 	}
+}
+
+func NewReplFromSnapshot(opts ReplOpts, snap *Snapshot) (*Repl, error) {
+	repl := NewRepl(opts)
+
+	// Unmarshal the snapshot
+	root, err := unmarshalNode(snap.Contents)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
+	}
+
+	// Convert to RootNode
+	if rootNode, ok := root.(*RootNode); ok {
+		repl.root = *rootNode
+		repl.currentNode = &repl.root
+	} else {
+		return nil, fmt.Errorf("snapshot does not contain a valid root node")
+	}
+
+	// Find and set the last active branch node
+	if snap.ActiveBranch != "" {
+		nodeMap := MapTree(&repl.root)
+		// First try exact match
+		if node, exists := nodeMap[snap.ActiveBranch]; exists {
+			repl.currentNode = node
+		} else {
+			// Try prefix/suffix match for short/full hashes
+			found := false
+			for hash, node := range nodeMap {
+
+				fmt.Println("hash:", hash)
+				fmt.Println("lastActiveBranch:", snap.ActiveBranch)
+				if strings.HasPrefix(hash, snap.ActiveBranch) || hash == snap.ActiveBranch {
+					fmt.Println("Found match:", hash)
+					repl.currentNode = node
+					found = true
+					break
+				}
+			}
+			if !found {
+				fmt.Printf("Warning: Last active branch %s not found in snapshot, starting at root\n", snap.ActiveBranch)
+			}
+		}
+	}
+
+	return repl, nil
 }
 
 func (r *Repl) Complete() {
@@ -235,69 +277,19 @@ func (r *Repl) PrintHistory() string {
 	return strings.Join(result, "\n")
 }
 
-func (r *Repl) GetRoutes() map[string]string {
-	// Each node has a parent, and may have a liost of children.
-	// we want to navigate
-	routes := map[string]string{}
-	if r.currentNode == nil {
-		return map[string]string{}
-	}
-	switch r.currentNode.Type() {
-	case NT_MESSAGE_PAIR:
-		if mp, ok := r.currentNode.(*MessagePairNode); ok && mp.Parent != nil {
-			routes["parent"] = "p:" + mp.Parent.Hash()
-			for i, child := range mp.Children {
-				routes[fmt.Sprintf("child-%d", i)] = "c:" + child.Hash()
-			}
-		}
-	case NT_ROOT:
-		if root, ok := r.currentNode.(*RootNode); ok {
-			for i, child := range root.Children {
-				routes[fmt.Sprintf("child-%d", i)] = "c:" + child.Hash()
-			}
-		}
-	}
-	return routes
-}
-
-func (r *Repl) TraverseToRoute(route string) error {
-	parts := strings.Split(route, ":")
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid route: %s", route)
-	}
-	switch parts[0] {
-	case "p":
-		if r.currentNode.Type() == NT_MESSAGE_PAIR {
-			if mp, ok := r.currentNode.(*MessagePairNode); ok && mp.Parent != nil {
-				r.currentNode = mp.Parent
-			}
-		}
-	case "c":
-		if r.currentNode.Type() == NT_MESSAGE_PAIR {
-			if mp, ok := r.currentNode.(*MessagePairNode); ok {
-				index, err := strconv.Atoi(parts[1])
-				if err != nil {
-					return fmt.Errorf("invalid child index: %s", parts[1])
-				}
-				if index < 0 || index >= len(mp.Children) {
-					return fmt.Errorf("child index out of bounds: %d", index)
-				}
-				r.currentNode = mp.Children[index]
-			}
-		}
-	}
-	return nil
-}
-
 func (r *Repl) QueueImages(paths []string) error {
 	r.enqueueImages = append(r.enqueueImages, paths...)
 	return nil
 }
 
-func (r *Repl) MapTree() map[string]Node {
-	return MapTree(r.currentNode)
-}
-
-func (r *Repl) Snapshot() ([]byte, error) {
-	return marshalNode(&r.root)
+func (r *Repl) Snapshot() (*Snapshot, error) {
+	b, e := marshalNode(&r.root)
+	if e != nil {
+		return nil, e
+	}
+	s := &Snapshot{
+		ActiveBranch: r.currentNode.Hash(),
+		Contents:     b,
+	}
+	return s, nil
 }
