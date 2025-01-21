@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 var loadDir *string
 var restore *string
+var chatEnabled bool
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -70,6 +72,7 @@ func main() {
 		fmt.Println("new chat")
 	}
 
+	chatEnabled = true
 	repl.Run()
 }
 
@@ -110,17 +113,83 @@ func handleCommand(panel brunch.Panel, nodeHash, line string) error {
 			return err
 		}
 	case "\\s":
-		snapshot, e := panel.Snapshot()
-		if e != nil {
-			fmt.Println("failed to take snapshot", e)
-			return e
-		}
-		// Create a snapshot file with timestamp
-		filename := fmt.Sprintf("snapshot-%d.json", time.Now().UnixMilli())
-		if err := snapshot.Save(filename); err != nil {
-			fmt.Println("failed to save snapshot", err)
+		saveSnapshot(panel)
+	case "\\p":
+		if err := panel.Parent(); err != nil {
+			fmt.Println("failed to go to parent", err)
 			return err
 		}
+	case "\\c":
+		if len(parts) < 2 {
+			fmt.Println("usage: \\c <index>")
+			return nil
+		}
+		idx, err := strconv.Atoi(parts[1])
+		if err != nil {
+			fmt.Println("failed to parse index", err)
+			return err
+		}
+		if err := panel.Child(idx); err != nil {
+			fmt.Println("failed to go to child", err)
+			return err
+		}
+	case "\\r":
+		if err := panel.Root(); err != nil {
+			fmt.Println("failed to go to root", err)
+			return err
+		}
+	case "\\g":
+		if len(parts) < 2 {
+			fmt.Println("usage: \\g <node_hash>")
+			return nil
+		}
+		if err := panel.Goto(parts[1]); err != nil {
+			fmt.Println("failed to go to node", err)
+			return err
+		}
+	case "\\.":
+		if panel.HasParent() {
+			fmt.Println("current node has parent; use \\p to access")
+		}
+		children := panel.ListChildren()
+		if len(children) == 0 {
+			fmt.Println("current node has no children")
+			return nil
+		}
+		fmt.Println("current node has children\n\tidx:\thash")
+		for idx, child := range children {
+			fmt.Printf("\t%d:\t%s\n", idx, child)
+		}
+		fmt.Println("\nuse \\c <idx> to go to child")
+	case "\\x":
+		chatEnabled = !chatEnabled
+		panel.ToggleChat(chatEnabled)
+		fmt.Printf("chat enabled: %t\n", chatEnabled)
+	case "\\q":
+		if *restore != "" {
+			fmt.Println("saving back to loaded snapshot")
+			if err := saveSnapshot(panel); err != nil {
+				fmt.Println("failed to save snapshot", err)
+				os.Exit(1)
+			}
+		}
+		fmt.Println("quit")
+		os.Exit(0)
+	}
+	return nil
+}
+
+func saveSnapshot(panel brunch.Panel) error {
+	snapshot, e := panel.Snapshot()
+	if e != nil {
+		fmt.Println("failed to take snapshot", e)
+		return e
+	}
+	// Create a snapshot file with timestamp
+	filename := fmt.Sprintf("snapshot-%d.json", time.Now().UnixMilli())
+	if err := snapshot.Save(filename); err != nil {
+		fmt.Println("failed to save snapshot", err)
+		return err
 	}
 	return nil
 }

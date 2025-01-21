@@ -2,6 +2,7 @@ package brunch
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -32,6 +33,17 @@ type Panel interface {
 	PrintHistory() string
 	QueueImages(paths []string) error
 	Snapshot() (*Snapshot, error)
+
+	Goto(nodeHash string) error
+	Parent() error
+	Child(idx int) error
+	Root() error
+
+	ListChildren() []string
+	HasParent() bool
+
+	ToggleChat(enabled bool)
+	Info() string
 }
 
 // Called when a command is entered
@@ -80,6 +92,7 @@ type Repl struct {
 	done chan bool
 
 	enqueueImages []string
+	chatEnabled   bool
 }
 
 // Obviously to create a repl..
@@ -91,6 +104,7 @@ func NewRepl(opts ReplOpts) *Repl {
 		commands:          opts.Commands,
 		interruptHandler:  opts.InterruptHandler,
 		completionHandler: opts.CompletionHandler,
+		chatEnabled:       true,
 	}
 }
 
@@ -114,27 +128,23 @@ func NewReplFromSnapshot(opts ReplOpts, snap *Snapshot) (*Repl, error) {
 	// Find and set the last active branch node
 	if snap.ActiveBranch != "" {
 		nodeMap := MapTree(&repl.root)
-		// First try exact match
+
+		// Try exact match first
 		if node, exists := nodeMap[snap.ActiveBranch]; exists {
 			repl.currentNode = node
-		} else {
-			// Try prefix/suffix match for short/full hashes
-			found := false
-			for hash, node := range nodeMap {
+			return repl, nil
+		}
 
-				fmt.Println("hash:", hash)
-				fmt.Println("lastActiveBranch:", snap.ActiveBranch)
-				if strings.HasPrefix(hash, snap.ActiveBranch) || hash == snap.ActiveBranch {
-					fmt.Println("Found match:", hash)
-					repl.currentNode = node
-					found = true
-					break
-				}
-			}
-			if !found {
-				fmt.Printf("Warning: Last active branch %s not found in snapshot, starting at root\n", snap.ActiveBranch)
+		// Try prefix match for short hashes
+		for hash, node := range nodeMap {
+			if strings.HasPrefix(hash, snap.ActiveBranch) {
+				repl.currentNode = node
+				return repl, nil
 			}
 		}
+
+		// If we get here, we couldn't find the node
+		return nil, fmt.Errorf("could not find active branch %s in snapshot", snap.ActiveBranch)
 	}
 
 	return repl, nil
@@ -146,8 +156,11 @@ func (r *Repl) Complete() {
 
 // Run the repl - blocking until the user interrupts or the repl is marked "Complete()"
 func (r *Repl) Run() {
-	r.root = r.provider.NewConversationRoot()
-	r.currentNode = &r.root
+
+	if r.currentNode == nil {
+		r.root = r.provider.NewConversationRoot()
+		r.currentNode = &r.root
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -199,6 +212,11 @@ func (r *Repl) Run() {
 						lines = append(lines, line)
 					}
 				}
+			}
+
+			if !r.chatEnabled {
+				fmt.Println("chat is disabled, skipping")
+				continue
 			}
 
 			question := strings.Join(lines, "\n")
@@ -292,4 +310,76 @@ func (r *Repl) Snapshot() (*Snapshot, error) {
 		Contents:     b,
 	}
 	return s, nil
+}
+
+func (r *Repl) Goto(nodeHash string) error {
+	nodeMap := MapTree(&r.root)
+	if node, exists := nodeMap[nodeHash]; exists {
+		r.currentNode = node
+		return nil
+	}
+	return errors.New("node not found")
+}
+
+func (r *Repl) Parent() error {
+	switch r.currentNode.Type() {
+	case NT_MESSAGE_PAIR:
+		if mpn, ok := r.currentNode.(*MessagePairNode); ok && mpn.Parent != nil {
+			r.currentNode = mpn.Parent
+			return nil
+		}
+		return errors.New("no parent found")
+	case NT_ROOT:
+		return nil
+	}
+	return errors.New("invalid node type")
+}
+
+func (r *Repl) Child(idx int) error {
+	switch r.currentNode.Type() {
+	case NT_MESSAGE_PAIR:
+		if mpn, ok := r.currentNode.(*MessagePairNode); ok && idx < len(mpn.Children) {
+			r.currentNode = mpn.Children[idx]
+			return nil
+		}
+		return errors.New("index out of bounds")
+	}
+	return errors.New("invalid node type")
+}
+
+func (r *Repl) Root() error {
+	r.currentNode = &r.root
+	return nil
+}
+
+func (r *Repl) HasParent() bool {
+	switch r.currentNode.Type() {
+	case NT_MESSAGE_PAIR:
+		if mpn, ok := r.currentNode.(*MessagePairNode); ok {
+			return mpn.Parent != nil
+		}
+	}
+	return false
+}
+
+func (r *Repl) ListChildren() []string {
+	switch r.currentNode.Type() {
+	case NT_MESSAGE_PAIR:
+		if mpn, ok := r.currentNode.(*MessagePairNode); ok {
+			children := []string{}
+			for _, child := range mpn.Children {
+				children = append(children, child.Hash())
+			}
+			return children
+		}
+	}
+	return []string{}
+}
+
+func (r *Repl) Info() string {
+	return fmt.Sprintf("current node: %s", r.currentNode.Hash())
+}
+
+func (r *Repl) ToggleChat(enabled bool) {
+	r.chatEnabled = enabled
 }

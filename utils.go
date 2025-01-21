@@ -84,24 +84,32 @@ func MapTree(node Node) map[string]Node {
 	if node == nil {
 		return nil
 	}
+
 	tree := make(map[string]Node)
-	switch node.Type() {
-	case NT_ROOT:
-		rn := node.(*RootNode)
-		tree[rn.Hash()] = rn
-		for _, child := range rn.Children {
-			for k, v := range MapTree(child) {
+
+	// Add the current node to the map
+	hash := node.Hash()
+	if hash != "" {
+		tree[hash] = node
+	}
+
+	// Recursively map children based on node type
+	switch n := node.(type) {
+	case *RootNode:
+		for _, child := range n.Children {
+			childMap := MapTree(child)
+			for k, v := range childMap {
 				tree[k] = v
 			}
 		}
-	case NT_MESSAGE_PAIR:
-		rn := node.(*MessagePairNode)
-		tree[rn.Hash()] = rn
-		for _, child := range rn.Children {
-			for k, v := range MapTree(child) {
+	case *MessagePairNode:
+		for _, child := range n.Children {
+			childMap := MapTree(child)
+			for k, v := range childMap {
 				tree[k] = v
 			}
 		}
 	}
+
 	return tree
 }
