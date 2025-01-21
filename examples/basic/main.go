@@ -97,7 +97,6 @@ func completionHandler(node brunch.Node) {
 
 func handleCommand(panel brunch.Panel, nodeHash, line string) error {
 	fmt.Printf("handleCommand: %s\n", line)
-
 	parts := strings.Split(line, " ")
 	switch parts[0] {
 	case "\\l":
