@@ -205,15 +205,62 @@ func historyFromNode(node Node, list []MessageData) []MessageData {
 	}
 	return list
 }
+
 func marshalNode(node Node) ([]byte, error) {
+	type nodeDataRoot struct {
+		Type        NodeTyppe `json:"type"`
+		Provider    string    `json:"provider"`
+		Model       string    `json:"model"`
+		Prompt      string    `json:"prompt"`
+		Temperature float64   `json:"temperature"`
+		MaxTokens   int       `json:"max_tokens"`
+	}
+
+	type nodeDataMessagePair struct {
+		Type      NodeTyppe    `json:"type"`
+		Assistant *MessageData `json:"assistant"`
+		User      *MessageData `json:"user"`
+		Time      time.Time    `json:"time"`
+	}
+
 	type nodeWrapper struct {
-		NodeData Node            `json:"node_data"`
-		Children map[string]Node `json:"children"`
+		NodeData interface{}       `json:"node_data"`
+		Children map[string][]byte `json:"children"`
 	}
 
 	wrapper := nodeWrapper{
-		NodeData: node,
-		Children: node.ToMap(),
+		Children: make(map[string][]byte),
+	}
+
+	// Marshal children recursively
+	for hash, child := range node.ToMap() {
+		childData, err := marshalNode(child)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal child node: %w", err)
+		}
+		wrapper.Children[hash] = childData
+	}
+
+	// Marshal node data based on type
+	switch n := node.(type) {
+	case *RootNode:
+		wrapper.NodeData = nodeDataRoot{
+			Type:        n.Type(),
+			Provider:    n.Provider,
+			Model:       n.Model,
+			Prompt:      n.Prompt,
+			Temperature: n.Temperature,
+			MaxTokens:   n.MaxTokens,
+		}
+	case *MessagePairNode:
+		wrapper.NodeData = nodeDataMessagePair{
+			Type:      n.Type(),
+			Assistant: n.Assistant,
+			User:      n.User,
+			Time:      n.Time,
+		}
+	default:
+		return nil, fmt.Errorf("unknown node type: %T", node)
 	}
 
 	return json.Marshal(wrapper)
@@ -221,50 +268,93 @@ func marshalNode(node Node) ([]byte, error) {
 
 func unmarshalNode(data []byte) (Node, error) {
 	var wrapper struct {
-		NodeData struct {
-			Type NodeTyppe `json:"type"`
-		} `json:"node_data"`
+		NodeData json.RawMessage            `json:"node_data"`
 		Children map[string]json.RawMessage `json:"children"`
 	}
 
 	if err := json.Unmarshal(data, &wrapper); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal wrapper: %w", err)
+	}
+
+	// First, determine the node type
+	var typeHolder struct {
+		Type NodeTyppe `json:"type"`
+	}
+	if err := json.Unmarshal(wrapper.NodeData, &typeHolder); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal node type: %w", err)
 	}
 
 	var result Node
 
-	switch wrapper.NodeData.Type {
+	// Unmarshal based on node type
+	switch typeHolder.Type {
 	case NT_ROOT:
-		var root RootNode
-		if err := json.Unmarshal(data, &root); err != nil {
-			return nil, err
+		var rootData struct {
+			Type        NodeTyppe `json:"type"`
+			Provider    string    `json:"provider"`
+			Model       string    `json:"model"`
+			Prompt      string    `json:"prompt"`
+			Temperature float64   `json:"temperature"`
+			MaxTokens   int       `json:"max_tokens"`
 		}
-		result = &root
+		if err := json.Unmarshal(wrapper.NodeData, &rootData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal root node: %w", err)
+		}
+		result = NewRootNode(RootOpt{
+			Provider:    rootData.Provider,
+			Model:       rootData.Model,
+			Prompt:      rootData.Prompt,
+			Temperature: rootData.Temperature,
+			MaxTokens:   rootData.MaxTokens,
+		})
+
 	case NT_MESSAGE_PAIR:
-		var msgPair MessagePairNode
-		if err := json.Unmarshal(data, &msgPair); err != nil {
-			return nil, err
+		var msgData struct {
+			Type      NodeTyppe    `json:"type"`
+			Assistant *MessageData `json:"assistant"`
+			User      *MessageData `json:"user"`
+			Time      time.Time    `json:"time"`
 		}
-		result = &msgPair
+		if err := json.Unmarshal(wrapper.NodeData, &msgData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal message pair node: %w", err)
+		}
+		msgPair := NewMessagePairNode(nil) // Parent will be set when adding to children
+		msgPair.Assistant = msgData.Assistant
+		msgPair.User = msgData.User
+		msgPair.Time = msgData.Time
+		result = msgPair
+
 	default:
-		return nil, fmt.Errorf("unknown node type: %s", wrapper.NodeData.Type)
+		return nil, fmt.Errorf("unknown node type: %s", typeHolder.Type)
 	}
 
 	// Recursively unmarshal children
 	if len(wrapper.Children) > 0 {
-		children := make([]Node, 0)
+		children := make([]Node, 0, len(wrapper.Children))
 		for _, childData := range wrapper.Children {
 			child, err := unmarshalNode(childData)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to unmarshal child node: %w", err)
 			}
 			children = append(children, child)
 		}
+
+		// Set parent-child relationships
 		switch n := result.(type) {
 		case *RootNode:
 			n.Children = children
+			for _, child := range children {
+				if mp, ok := child.(*MessagePairNode); ok {
+					mp.Parent = n
+				}
+			}
 		case *MessagePairNode:
 			n.Children = children
+			for _, child := range children {
+				if mp, ok := child.(*MessagePairNode); ok {
+					mp.Parent = n
+				}
+			}
 		}
 	}
 
