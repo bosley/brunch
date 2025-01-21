@@ -8,7 +8,7 @@ import (
 	"github.com/bosley/brunch/anthropic"
 )
 
-func clientFromSelectedProvider(config *Config) brunch.NttProvider {
+func clientFromSelectedProvider(config *Config) brunch.Provider {
 	switch config.Providers[config.SelectedProvider].Name {
 	case ProviderAnthropicChat:
 		return anthropicChat(config)
@@ -19,7 +19,7 @@ func clientFromSelectedProvider(config *Config) brunch.NttProvider {
 	return nil
 }
 
-func anthropicChat(config *Config) brunch.NttProvider {
+func anthropicChat(config *Config) brunch.Provider {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
 		fmt.Println("Please set ANTHROPIC_API_KEY environment variable")

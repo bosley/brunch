@@ -25,6 +25,6 @@ go.work.sum
 .env
 
 .DS_Store
-brunch
-basic
+./brunch
+./basic
 brunch.yaml

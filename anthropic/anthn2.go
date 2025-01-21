@@ -1,8 +1,6 @@
 package anthropic
 
 import (
-	"time"
-
 	"github.com/bosley/brunch"
 )
 
@@ -11,7 +9,8 @@ type AnthropicProvider struct {
 	pendingImages []string
 }
 
-// NewAnthropicProvider creates a new brunch provider for Anthropic
+var _ brunch.Provider = (*AnthropicProvider)(nil)
+
 func NewAnthropicProvider(client *Client) *AnthropicProvider {
 	return &AnthropicProvider{
 		client:        client,
@@ -19,8 +18,7 @@ func NewAnthropicProvider(client *Client) *AnthropicProvider {
 	}
 }
 
-// NewNett creates a new root node with Anthropic-specific configuration
-func (ap *AnthropicProvider) NewNett() brunch.RootNode {
+func (ap *AnthropicProvider) NewConversationRoot() brunch.RootNode {
 	return *brunch.NewRootNode(brunch.RootOpt{
 		Provider:    "anthropic",
 		Model:       ap.client.model,
@@ -30,17 +28,9 @@ func (ap *AnthropicProvider) NewNett() brunch.RootNode {
 	})
 }
 
-// ExtendFrom creates a new message pair node from the given node
-func (ap *AnthropicProvider) ExtendFrom(node brunch.NttNode) brunch.MessageCreator {
+func (ap *AnthropicProvider) ExtendFrom(node brunch.Node) brunch.MessageCreator {
 
-	// Create a new message pair node
-	msgPair := &brunch.MessagePairNode{
-		Node: brunch.Node{
-			Type:   brunch.NT_MESSAGE_PAIR,
-			Parent: node,
-		},
-		Time: time.Now(),
-	}
+	msgPair := brunch.NewMessagePairNode(node)
 
 	switch parent := node.(type) {
 	case *brunch.RootNode:
@@ -85,8 +75,7 @@ func (ap *AnthropicProvider) ExtendFrom(node brunch.NttNode) brunch.MessageCreat
 	}
 }
 
-// GetRoot traverses up the node tree to find the root node
-func (ap *AnthropicProvider) GetRoot(node brunch.NttNode) brunch.RootNode {
+func (ap *AnthropicProvider) GetRoot(node brunch.Node) brunch.RootNode {
 	current := node
 	for {
 		if current.Type() == brunch.NT_ROOT {
@@ -95,7 +84,6 @@ func (ap *AnthropicProvider) GetRoot(node brunch.NttNode) brunch.RootNode {
 			}
 		}
 
-		// Type assert to access the Node struct
 		if msgPair, ok := current.(*brunch.MessagePairNode); ok {
 			if msgPair.Parent != nil {
 				current = msgPair.Parent
@@ -103,23 +91,18 @@ func (ap *AnthropicProvider) GetRoot(node brunch.NttNode) brunch.RootNode {
 			}
 		}
 
-		// If we can't find the root, return an empty root node
 		return *brunch.NewRootNode(brunch.RootOpt{
 			Provider: "anthropic",
 		})
 	}
 }
 
-// GetHistory returns the conversation history as a slice of message maps
-func (ap *AnthropicProvider) GetHistory(node brunch.NttNode) []map[string]string {
+func (ap *AnthropicProvider) GetHistory(node brunch.Node) []map[string]string {
 	var history []map[string]string
 	current := node
-
-	// Traverse up the tree collecting messages
 	for {
 		if msgPair, ok := current.(*brunch.MessagePairNode); ok {
 			if msgPair.Assistant != nil && msgPair.User != nil {
-				// Add the message pair to history
 				history = append([]map[string]string{
 					{
 						"role":    msgPair.Assistant.Role,
@@ -139,7 +122,6 @@ func (ap *AnthropicProvider) GetHistory(node brunch.NttNode) []map[string]string
 		}
 		break
 	}
-
 	return history
 }
 

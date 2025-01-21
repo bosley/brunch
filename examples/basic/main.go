@@ -16,24 +16,20 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	doInitDir := flag.String("init", "", "Initialize the config file")
 	loadDir := flag.String("load", ".", "Load directory containing insu.yaml")
 	flag.Parse()
 
-	if *doInitDir != "" {
-		if err := InitDirectory(*doInitDir); err != nil {
+	config, err := LoadFromDir(*loadDir)
+	if err != nil {
+		if err := InitDirectory(*loadDir); err != nil {
 			fmt.Println("Failed to initialize directory:", err)
 			os.Exit(1)
 		}
-		*loadDir = *doInitDir
-	}
-
-	config, err := LoadFromDir(*loadDir)
-	if err != nil {
-		fmt.Println("Failed to load config:", err)
-
-		fmt.Println("please use the -init flag to initialize the config file (see --help for more info)")
-		os.Exit(1)
+		config, err = LoadFromDir(*loadDir)
+		if err != nil {
+			fmt.Println("Failed to load config:", err)
+			os.Exit(1)
+		}
 	}
 
 	client := clientFromSelectedProvider(config)
@@ -61,11 +57,11 @@ func postHook(response *string) error {
 	return nil
 }
 
-func interruptHandler(node brunch.NttNode) {
+func interruptHandler(node brunch.Node) {
 	fmt.Println("InterruptHandler", brunch.PrintTree(node))
 }
 
-func completionHandler(node brunch.NttNode) {
+func completionHandler(node brunch.Node) {
 	fmt.Println("CompletionHandler", brunch.PrintTree(node))
 
 }
