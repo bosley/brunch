@@ -17,7 +17,7 @@ var chatEnabled bool
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
 
@@ -77,28 +77,40 @@ func main() {
 }
 
 func preHook(query *string) error {
-	fmt.Printf("PreHook: %s\n", *query)
+	//fmt.Printf("PreHook: %s\n", *query)
 	return nil
 }
 
 func postHook(response *string) error {
-	fmt.Printf("PostHook: %s\n", *response)
+	fmt.Println("assistant> ", *response)
 	return nil
 }
 
 func interruptHandler(node brunch.Node) {
-	fmt.Println("InterruptHandler", brunch.PrintTree(node))
+	//fmt.Println("InterruptHandler", brunch.PrintTree(node))
 }
 
 func completionHandler(node brunch.Node) {
-	fmt.Println("CompletionHandler", brunch.PrintTree(node))
+	//fmt.Println("CompletionHandler", brunch.PrintTree(node))
 
 }
 
 func handleCommand(panel brunch.Panel, nodeHash, line string) error {
-	fmt.Printf("handleCommand: %s\n", line)
 	parts := strings.Split(line, " ")
 	switch parts[0] {
+	case "\\?":
+		fmt.Println("Commands:")
+		fmt.Println("\t\\l: List chat history [current branch of chat]")
+		fmt.Println("\t\\t: List chat tree [all branches]")
+		fmt.Println("\t\\i: Queue image [import image file into chat for inquiry]")
+		fmt.Println("\t\\s: Save snapshot [save a snapshot of the current tree to disk]")
+		fmt.Println("\t\\p: Go to parent [traverse up the tree]")
+		fmt.Println("\t\\c: Go to child [traverse down the tree to the nth child]")
+		fmt.Println("\t\\r: Go to root [traverse to the root of the tree]")
+		fmt.Println("\t\\g: Go to node [traverse to a specific node by hash]")
+		fmt.Println("\t\\.: List children [list all children of the current node]")
+		fmt.Println("\t\\x: Toggle chat [toggle chat mode on/off - chat on by default press enter twice to send with no command leading]")
+		fmt.Println("\t\\q: Quit [save and quit]")
 	case "\\l":
 		fmt.Println(panel.PrintHistory())
 	case "\\t":

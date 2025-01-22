@@ -175,7 +175,7 @@ func (r *Repl) Run() {
 	}
 
 	prompt := func() string {
-		return fmt.Sprintf("\n%s> ", shortHash())
+		return fmt.Sprintf("\n %s>  ", shortHash())
 	}
 
 	// Start chat loop in goroutine
@@ -233,6 +233,11 @@ func (r *Repl) Run() {
 				r.provider.QueueImages(r.enqueueImages)
 				r.enqueueImages = []string{}
 			}
+
+			fmt.Print(`
+	-- [ S E N T ] --
+
+`)
 
 			creator := r.provider.ExtendFrom(r.currentNode)
 			msgPair, err := creator(question)
