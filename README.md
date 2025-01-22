@@ -1,9 +1,13 @@
 # brunch
 
+Requires: 
+
+- `ANTHROPIC_API_KEY` environment variable set
 
 ```bash
  ~/workspace/brunch/ [mods*] make                   
 go build -o bru ./cmd/bru
+
  ~/workspace/brunch/ [mods*] ./bru
 new chat
 
