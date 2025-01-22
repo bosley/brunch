@@ -2,10 +2,10 @@ package brunch
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 )
@@ -28,19 +28,29 @@ const (
 // A "Control panel" handed to the user that called on the repl
 // to allow them to change how they interact with the message set
 // on the actual human interface
-type NttReplPanel interface {
+type Panel interface {
 	PrintTree() string
 	PrintHistory() string
-	GetRoutes() map[string]string
-	TraverseToRoute(route string) error
 	QueueImages(paths []string) error
+	Snapshot() (*Snapshot, error)
+
+	Goto(nodeHash string) error
+	Parent() error
+	Child(idx int) error
+	Root() error
+
+	ListChildren() []string
+	HasParent() bool
+
+	ToggleChat(enabled bool)
+	Info() string
 }
 
 // Called when a command is entered
 // If error is returned, it will be displayed to the user
 // and the command will not be entered, and the message will
 // not be added to the tree
-type CommandHandler func(panel NttReplPanel, nodeHash, line string) error
+type CommandHandler func(panel Panel, nodeHash, line string) error
 
 // CommandOpts is the set of commands that will be available to the user, supplied by
 // program external to this library. We supply this so user can change the repl key trigger
@@ -82,6 +92,7 @@ type Repl struct {
 	done chan bool
 
 	enqueueImages []string
+	chatEnabled   bool
 }
 
 // Obviously to create a repl..
@@ -93,7 +104,50 @@ func NewRepl(opts ReplOpts) *Repl {
 		commands:          opts.Commands,
 		interruptHandler:  opts.InterruptHandler,
 		completionHandler: opts.CompletionHandler,
+		chatEnabled:       true,
 	}
+}
+
+func NewReplFromSnapshot(opts ReplOpts, snap *Snapshot) (*Repl, error) {
+	repl := NewRepl(opts)
+
+	// Unmarshal the snapshot
+	root, err := unmarshalNode(snap.Contents)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
+	}
+
+	// Convert to RootNode
+	if rootNode, ok := root.(*RootNode); ok {
+		repl.root = *rootNode
+		repl.currentNode = &repl.root
+	} else {
+		return nil, fmt.Errorf("snapshot does not contain a valid root node")
+	}
+
+	// Find and set the last active branch node
+	if snap.ActiveBranch != "" {
+		nodeMap := MapTree(&repl.root)
+
+		// Try exact match first
+		if node, exists := nodeMap[snap.ActiveBranch]; exists {
+			repl.currentNode = node
+			return repl, nil
+		}
+
+		// Try prefix match for short hashes
+		for hash, node := range nodeMap {
+			if strings.HasPrefix(hash, snap.ActiveBranch) {
+				repl.currentNode = node
+				return repl, nil
+			}
+		}
+
+		// If we get here, we couldn't find the node
+		return nil, fmt.Errorf("could not find active branch %s in snapshot", snap.ActiveBranch)
+	}
+
+	return repl, nil
 }
 
 func (r *Repl) Complete() {
@@ -102,8 +156,11 @@ func (r *Repl) Complete() {
 
 // Run the repl - blocking until the user interrupts or the repl is marked "Complete()"
 func (r *Repl) Run() {
-	r.root = r.provider.NewConversationRoot()
-	r.currentNode = &r.root
+
+	if r.currentNode == nil {
+		r.root = r.provider.NewConversationRoot()
+		r.currentNode = &r.root
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -118,7 +175,7 @@ func (r *Repl) Run() {
 	}
 
 	prompt := func() string {
-		return fmt.Sprintf("\n%s> ", shortHash())
+		return fmt.Sprintf("\n %s>  ", shortHash())
 	}
 
 	// Start chat loop in goroutine
@@ -157,6 +214,11 @@ func (r *Repl) Run() {
 				}
 			}
 
+			if !r.chatEnabled {
+				fmt.Println("chat is disabled, skipping")
+				continue
+			}
+
 			question := strings.Join(lines, "\n")
 
 			if r.preHook != nil {
@@ -171,6 +233,11 @@ func (r *Repl) Run() {
 				r.provider.QueueImages(r.enqueueImages)
 				r.enqueueImages = []string{}
 			}
+
+			fmt.Print(`
+	-- [ S E N T ] --
+
+`)
 
 			creator := r.provider.ExtendFrom(r.currentNode)
 			msgPair, err := creator(question)
@@ -233,61 +300,105 @@ func (r *Repl) PrintHistory() string {
 	return strings.Join(result, "\n")
 }
 
-func (r *Repl) GetRoutes() map[string]string {
-	// Each node has a parent, and may have a liost of children.
-	// we want to navigate
-	routes := map[string]string{}
-	if r.currentNode == nil {
-		return map[string]string{}
-	}
-	switch r.currentNode.Type() {
-	case NT_MESSAGE_PAIR:
-		if mp, ok := r.currentNode.(*MessagePairNode); ok && mp.Parent != nil {
-			routes["parent"] = "p:" + mp.Parent.Hash()
-			for i, child := range mp.Children {
-				routes[fmt.Sprintf("child-%d", i)] = "c:" + child.Hash()
-			}
-		}
-	case NT_ROOT:
-		if root, ok := r.currentNode.(*RootNode); ok {
-			for i, child := range root.Children {
-				routes[fmt.Sprintf("child-%d", i)] = "c:" + child.Hash()
-			}
-		}
-	}
-	return routes
-}
-
-func (r *Repl) TraverseToRoute(route string) error {
-	parts := strings.Split(route, ":")
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid route: %s", route)
-	}
-	switch parts[0] {
-	case "p":
-		if r.currentNode.Type() == NT_MESSAGE_PAIR {
-			if mp, ok := r.currentNode.(*MessagePairNode); ok && mp.Parent != nil {
-				r.currentNode = mp.Parent
-			}
-		}
-	case "c":
-		if r.currentNode.Type() == NT_MESSAGE_PAIR {
-			if mp, ok := r.currentNode.(*MessagePairNode); ok {
-				index, err := strconv.Atoi(parts[1])
-				if err != nil {
-					return fmt.Errorf("invalid child index: %s", parts[1])
-				}
-				if index < 0 || index >= len(mp.Children) {
-					return fmt.Errorf("child index out of bounds: %d", index)
-				}
-				r.currentNode = mp.Children[index]
-			}
-		}
-	}
-	return nil
-}
-
 func (r *Repl) QueueImages(paths []string) error {
 	r.enqueueImages = append(r.enqueueImages, paths...)
 	return nil
+}
+
+func (r *Repl) Snapshot() (*Snapshot, error) {
+	b, e := marshalNode(&r.root)
+	if e != nil {
+		return nil, e
+	}
+	s := &Snapshot{
+		ActiveBranch: r.currentNode.Hash(),
+		Contents:     b,
+	}
+	return s, nil
+}
+
+func (r *Repl) Goto(nodeHash string) error {
+	nodeMap := MapTree(&r.root)
+	if node, exists := nodeMap[nodeHash]; exists {
+		r.currentNode = node
+		return nil
+	}
+	return errors.New("node not found")
+}
+
+func (r *Repl) Parent() error {
+	switch r.currentNode.Type() {
+	case NT_MESSAGE_PAIR:
+		if mpn, ok := r.currentNode.(*MessagePairNode); ok && mpn.Parent != nil {
+			r.currentNode = mpn.Parent
+			return nil
+		}
+		return errors.New("no parent found")
+	case NT_ROOT:
+		return nil
+	}
+	return errors.New("invalid node type")
+}
+
+func (r *Repl) Child(idx int) error {
+	switch r.currentNode.Type() {
+	case NT_ROOT:
+		if rn, ok := r.currentNode.(*RootNode); ok && idx < len(rn.Children) {
+			r.currentNode = rn.Children[idx]
+			return nil
+		}
+		return errors.New("index out of bounds")
+	case NT_MESSAGE_PAIR:
+		if mpn, ok := r.currentNode.(*MessagePairNode); ok && idx < len(mpn.Children) {
+			r.currentNode = mpn.Children[idx]
+			return nil
+		}
+		return errors.New("index out of bounds")
+	}
+	return errors.New("invalid node type")
+}
+
+func (r *Repl) Root() error {
+	r.currentNode = &r.root
+	return nil
+}
+
+func (r *Repl) HasParent() bool {
+	switch r.currentNode.Type() {
+	case NT_MESSAGE_PAIR:
+		if mpn, ok := r.currentNode.(*MessagePairNode); ok {
+			return mpn.Parent != nil
+		}
+	}
+	return false
+}
+
+func (r *Repl) ListChildren() []string {
+	switch r.currentNode.Type() {
+	case NT_ROOT:
+		if rn, ok := r.currentNode.(*RootNode); ok {
+			children := []string{}
+			for _, child := range rn.Children {
+				children = append(children, child.Hash())
+			}
+			return children
+		}
+	case NT_MESSAGE_PAIR:
+		if mpn, ok := r.currentNode.(*MessagePairNode); ok {
+			children := []string{}
+			for _, child := range mpn.Children {
+				children = append(children, child.Hash())
+			}
+			return children
+		}
+	}
+	return []string{}
+}
+
+func (r *Repl) Info() string {
+	return fmt.Sprintf("current node: %s", r.currentNode.Hash())
+}
+
+func (r *Repl) ToggleChat(enabled bool) {
+	r.chatEnabled = enabled
 }

@@ -3,11 +3,10 @@ package main
 import (
 	"embed"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed prompts
@@ -17,7 +16,7 @@ const (
 	DefaultMaxTokens    = 4096
 	DefaultTemperature  = 0.7
 	DefaultSystemPrompt = "prompts/sp-think.xml"
-	DefaultConfigName   = "brunch.yaml"
+	DefaultConfigName   = "brunch.json"
 )
 
 type AvailableProviders string
@@ -29,15 +28,17 @@ const (
 type SystemPromptSource string
 
 type Provider struct {
-	Name         AvailableProviders `yaml:"name"`
-	MaxTokens    int                `yaml:"max_tokens"`
-	Temperature  float64            `yaml:"temperature"`
-	SystemPrompt string             `yaml:"system_prompt"` // overrides the default if set
+	Name         AvailableProviders `json:"name"`
+	MaxTokens    int                `json:"max_tokens"`
+	Temperature  float64            `json:"temperature"`
+	SystemPrompt string             `json:"system_prompt"` // overrides the default if set
 }
 
 type Config struct {
-	SelectedProvider AvailableProviders `yaml:"selected_provider"`
-	Providers        map[AvailableProviders]Provider
+	SelectedProvider AvailableProviders              `json:"selected_provider"`
+	Providers        map[AvailableProviders]Provider `json:"providers"`
+	History          json.RawMessage                 `json:"history,omitempty"`
+	Snapshot         json.RawMessage                 `json:"snapshot,omitempty"`
 }
 
 func loadPrompt(path string) (string, error) {
@@ -78,12 +79,12 @@ func InitDirectory(dir string) error {
 		},
 	}
 
-	yamlData, err := yaml.Marshal(defaultConfig)
+	jsonData, err := json.MarshalIndent(defaultConfig, "", "    ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, yamlData, 0644); err != nil {
+	if err := os.WriteFile(configPath, jsonData, 0644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
@@ -99,7 +100,7 @@ func LoadFromDir(dir string) (*Config, error) {
 	}
 
 	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
@@ -120,4 +121,14 @@ func LoadFromDir(dir string) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+func (c *Config) Save(dir string) error {
+	configPath := filepath.Join(dir, DefaultConfigName)
+
+	jsonData, err := json.MarshalIndent(c, "", "    ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+	return os.WriteFile(configPath, jsonData, 0644)
 }

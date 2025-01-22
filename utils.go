@@ -78,3 +78,38 @@ func messageToString(message *MessageData) string {
 func messageToStringWithImages(message *MessageData, images []string) string {
 	return fmt.Sprintf("%s: %s [%d images]: %s", message.Role, message.UnencodedContent(), len(images), strings.Join(images, ", "))
 }
+
+// todo: make this not so bad
+func MapTree(node Node) map[string]Node {
+	if node == nil {
+		return nil
+	}
+
+	tree := make(map[string]Node)
+
+	// Add the current node to the map
+	hash := node.Hash()
+	if hash != "" {
+		tree[hash] = node
+	}
+
+	// Recursively map children based on node type
+	switch n := node.(type) {
+	case *RootNode:
+		for _, child := range n.Children {
+			childMap := MapTree(child)
+			for k, v := range childMap {
+				tree[k] = v
+			}
+		}
+	case *MessagePairNode:
+		for _, child := range n.Children {
+			childMap := MapTree(child)
+			for k, v := range childMap {
+				tree[k] = v
+			}
+		}
+	}
+
+	return tree
+}
