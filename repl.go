@@ -337,6 +337,12 @@ func (r *Repl) Parent() error {
 
 func (r *Repl) Child(idx int) error {
 	switch r.currentNode.Type() {
+	case NT_ROOT:
+		if rn, ok := r.currentNode.(*RootNode); ok && idx < len(rn.Children) {
+			r.currentNode = rn.Children[idx]
+			return nil
+		}
+		return errors.New("index out of bounds")
 	case NT_MESSAGE_PAIR:
 		if mpn, ok := r.currentNode.(*MessagePairNode); ok && idx < len(mpn.Children) {
 			r.currentNode = mpn.Children[idx]
@@ -364,6 +370,14 @@ func (r *Repl) HasParent() bool {
 
 func (r *Repl) ListChildren() []string {
 	switch r.currentNode.Type() {
+	case NT_ROOT:
+		if rn, ok := r.currentNode.(*RootNode); ok {
+			children := []string{}
+			for _, child := range rn.Children {
+				children = append(children, child.Hash())
+			}
+			return children
+		}
 	case NT_MESSAGE_PAIR:
 		if mpn, ok := r.currentNode.(*MessagePairNode); ok {
 			children := []string{}

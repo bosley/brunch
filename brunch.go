@@ -37,10 +37,16 @@ type Node interface {
 type MessageCreator func(userMessage string) (*MessagePairNode, error)
 
 type node struct {
-	Type NodeTyppe `json:"type"`
+	Type     NodeTyppe `json:"type"`
+	Parent   Node      `json:"parent,omitempty"`
+	Children []Node    `json:"children"`
+}
 
-	Parent   Node   `json:"parent,omitempty"`
-	Children []Node `json:"children,omitempty"`
+func (n *node) AddChild(child Node) {
+	if n.Children == nil {
+		n.Children = make([]Node, 0, 1)
+	}
+	n.Children = append(n.Children, child)
 }
 
 func (n *node) ToMap() map[string]Node {

@@ -3,7 +3,6 @@ package brunch
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 )
 
 type Snapshot struct {
@@ -11,36 +10,14 @@ type Snapshot struct {
 	Contents     []byte `json:"contents"`
 }
 
-func (s *Snapshot) Save(filepath string) error {
-	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open snapshot file: %w", err)
-	}
-	defer file.Close()
-
-	b, err := json.Marshal(s)
-	if err != nil {
-		return fmt.Errorf("failed to marshal snapshot: %w", err)
-	}
-
-	_, err = file.Write(b)
-	if err != nil {
-		return fmt.Errorf("failed to write snapshot: %w", err)
-	}
-
-	return nil
+func (s *Snapshot) Marshal() ([]byte, error) {
+	return json.Marshal(s)
 }
 
-func LoadSnapshot(filepath string) (*Snapshot, error) {
-	file, err := os.ReadFile(filepath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read snapshot file: %w", err)
-	}
-
+func SnapshotFromJSON(data []byte) (*Snapshot, error) {
 	var snapshot Snapshot
-	if err := json.Unmarshal(file, &snapshot); err != nil {
+	if err := json.Unmarshal(data, &snapshot); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
 	}
-
 	return &snapshot, nil
 }

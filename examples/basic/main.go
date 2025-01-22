@@ -7,13 +7,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/bosley/brunch"
 )
 
 var loadDir *string
-var restore *string
+var config *Config
 var chatEnabled bool
 
 func main() {
@@ -23,11 +22,10 @@ func main() {
 	slog.SetDefault(logger)
 
 	loadDir = flag.String("load", ".", "Load directory containing insu.yaml")
-	restore = flag.String("snapshot", "", "Restore from snapshot")
 	flag.Parse()
 
 	var err error
-	config, err := LoadFromDir(*loadDir)
+	config, err = LoadFromDir(*loadDir)
 	if err != nil {
 		if err := InitDirectory(*loadDir); err != nil {
 			fmt.Println("Failed to initialize directory:", err)
@@ -55,8 +53,8 @@ func main() {
 	}
 
 	var repl *brunch.Repl
-	if *restore != "" {
-		snap, err := brunch.LoadSnapshot(*restore)
+	if config.Snapshot != nil {
+		snap, err := brunch.SnapshotFromJSON(config.Snapshot)
 		if err != nil {
 			fmt.Println("failed to load snapshot", err)
 			os.Exit(1)
@@ -165,12 +163,10 @@ func handleCommand(panel brunch.Panel, nodeHash, line string) error {
 		panel.ToggleChat(chatEnabled)
 		fmt.Printf("chat enabled: %t\n", chatEnabled)
 	case "\\q":
-		if *restore != "" {
-			fmt.Println("saving back to loaded snapshot")
-			if err := saveSnapshot(panel); err != nil {
-				fmt.Println("failed to save snapshot", err)
-				os.Exit(1)
-			}
+		fmt.Println("saving back to loaded snapshot")
+		if err := saveSnapshot(panel); err != nil {
+			fmt.Println("failed to save snapshot", err)
+			os.Exit(1)
 		}
 		fmt.Println("quit")
 		os.Exit(0)
@@ -184,11 +180,14 @@ func saveSnapshot(panel brunch.Panel) error {
 		fmt.Println("failed to take snapshot", e)
 		return e
 	}
-	// Create a snapshot file with timestamp
-	filename := fmt.Sprintf("snapshot-%d.json", time.Now().UnixMilli())
-	if err := snapshot.Save(filename); err != nil {
-		fmt.Println("failed to save snapshot", err)
-		return err
+	config.Snapshot, e = snapshot.Marshal()
+	if e != nil {
+		fmt.Println("failed to marshal snapshot", e)
+		return e
+	}
+	if e := config.Save(*loadDir); e != nil {
+		fmt.Println("failed to save config", e)
+		return e
 	}
 	return nil
 }

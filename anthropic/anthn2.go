@@ -29,14 +29,13 @@ func (ap *AnthropicProvider) NewConversationRoot() brunch.RootNode {
 }
 
 func (ap *AnthropicProvider) ExtendFrom(node brunch.Node) brunch.MessageCreator {
-
 	msgPair := brunch.NewMessagePairNode(node)
 
 	switch parent := node.(type) {
 	case *brunch.RootNode:
-		parent.Children = append(parent.Children, msgPair)
+		parent.AddChild(msgPair)
 	case *brunch.MessagePairNode:
-		parent.Children = append(parent.Children, msgPair)
+		parent.AddChild(msgPair)
 	}
 
 	return func(userMessage string) (*brunch.MessagePairNode, error) {

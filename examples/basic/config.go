@@ -38,7 +38,7 @@ type Config struct {
 	SelectedProvider AvailableProviders              `json:"selected_provider"`
 	Providers        map[AvailableProviders]Provider `json:"providers"`
 	History          json.RawMessage                 `json:"history,omitempty"`
-	LastActiveBranch string                          `json:"last_active_branch,omitempty"`
+	Snapshot         json.RawMessage                 `json:"snapshot,omitempty"`
 }
 
 func loadPrompt(path string) (string, error) {
@@ -121,4 +121,14 @@ func LoadFromDir(dir string) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+func (c *Config) Save(dir string) error {
+	configPath := filepath.Join(dir, DefaultConfigName)
+
+	jsonData, err := json.MarshalIndent(c, "", "    ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+	return os.WriteFile(configPath, jsonData, 0644)
 }
