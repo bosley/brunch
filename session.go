@@ -17,6 +17,12 @@ import (
 	"github.com/google/uuid"
 )
 
+type OperationalCallback struct {
+	OnLoadChat    func(name string, hash *string) error
+	OnNewChat     func(name string, provider string) error
+	OnNewProvider func(name string, host string, baseUrl string, maxTokens int, temperature float64, systemPrompt string) error
+}
+
 type SessionOpts struct {
 	Bucket   string
 	Provider string
@@ -24,7 +30,6 @@ type SessionOpts struct {
 
 type coreSession struct {
 	id               string
-	core             *Core
 	selectedProvider string
 	directory        string
 
@@ -50,7 +55,6 @@ func (c *Core) NewSession(opts SessionOpts) (*coreSession, error) {
 		defer c.sesMu.Unlock()
 		c.sessions[id] = &coreSession{
 			id:               id,
-			core:             c,
 			selectedProvider: opts.Provider,
 			provider:         nil, // we will have sessions BEFORE providers, as sessions DEFINE providers before use
 			directory:        directory,
@@ -60,7 +64,7 @@ func (c *Core) NewSession(opts SessionOpts) (*coreSession, error) {
 }
 
 // Send a statement to the session
-func (s *coreSession) execute(stmt Statement) error {
+func (s *coreSession) execute(stmt Statement, callbacks OperationalCallback) error {
 
 	if !stmt.IsPrepared() {
 		if err := stmt.Prepare(); err != nil {
@@ -80,11 +84,11 @@ func (s *coreSession) execute(stmt Statement) error {
 
 	switch stmt.cmd.keyword {
 	case "new-provider":
-		return s.newProvider(stmt.cmd.nameGiven, propertyMap)
+		return s.newProvider(stmt.cmd.nameGiven, propertyMap, callbacks)
 	case "new-chat":
-		return s.newChat(stmt.cmd.nameGiven, propertyMap)
+		return s.newChat(stmt.cmd.nameGiven, propertyMap, callbacks)
 	case "chat":
-		return s.chat(stmt.cmd.nameGiven, propertyMap)
+		return s.chat(stmt.cmd.nameGiven, propertyMap, callbacks)
 	}
 
 	return errors.New("not implemented")
@@ -113,7 +117,7 @@ func (s *coreSession) isPropertyValid(p *property) bool {
 	return false
 }
 
-func (s *coreSession) newProvider(name string, propertyMap map[string]*property) error {
+func (s *coreSession) newProvider(name string, propertyMap map[string]*property, callbacks OperationalCallback) error {
 
 	var err error
 	var host string
@@ -168,10 +172,10 @@ func (s *coreSession) newProvider(name string, propertyMap map[string]*property)
 	// the controlled map of providers that can be selected from as we have a hard
 	// seperation between provider implementations and the core
 	// the core will validate the properties data
-	return s.core.AddProvider(s.provider, name, host, baseUrl, maxTokens, temperature, systemPrompt)
+	return callbacks.OnNewProvider(name, host, baseUrl, maxTokens, temperature, systemPrompt)
 }
 
-func (s *coreSession) newChat(name string, propertyMap map[string]*property) error {
+func (s *coreSession) newChat(name string, propertyMap map[string]*property, callbacks OperationalCallback) error {
 
 	var provider string
 
@@ -192,10 +196,10 @@ func (s *coreSession) newChat(name string, propertyMap map[string]*property) err
 		return fmt.Errorf("name must be specified")
 	}
 
-	return s.core.NewChat(name, provider)
+	return callbacks.OnNewChat(name, provider)
 }
 
-func (s *coreSession) chat(name string, propertyMap map[string]*property) error {
+func (s *coreSession) chat(name string, propertyMap map[string]*property, callbacks OperationalCallback) error {
 
 	var hash *string
 
@@ -212,5 +216,5 @@ func (s *coreSession) chat(name string, propertyMap map[string]*property) error 
 		return fmt.Errorf("name must be specified")
 	}
 
-	return s.core.LoadChat(name, hash)
+	return callbacks.OnLoadChat(name, hash)
 }

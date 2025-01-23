@@ -118,7 +118,14 @@ func (c *Core) ExecuteStatement(sessionId string, stmt Statement) error {
 	if !ok {
 		return fmt.Errorf("session %s not found", sessionId)
 	}
-	return session.execute(stmt)
+
+	callbacks := OperationalCallback{
+		OnNewChat:     c.NewChat,
+		OnNewProvider: c.AddProvider,
+		OnLoadChat:    c.LoadChat,
+	}
+
+	return session.execute(stmt, callbacks)
 }
 
 // Here we clone the provider handed to us and store in the provider map under a new name
