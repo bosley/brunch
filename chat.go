@@ -12,6 +12,8 @@ type Panel interface {
 	QueueImages(paths []string) error
 	Snapshot() (*Snapshot, error)
 
+	Artifacts() []Artifact
+
 	Goto(nodeHash string) error
 	Parent() error
 	Child(idx int) error
@@ -230,4 +232,18 @@ func (c *ChatInstance) ToggleChat(enabled bool) {
 
 func (c *ChatInstance) CurrentNode() Node {
 	return c.currentNode
+}
+
+func (c *ChatInstance) Artifacts() []Artifact {
+	switch c.currentNode.Type() {
+	case NT_MESSAGE_PAIR:
+		if mpn, ok := c.currentNode.(*MessagePairNode); ok {
+			artifacts, err := ParseArtifactsFrom(mpn.Assistant)
+			if err != nil {
+				return []Artifact{}
+			}
+			return artifacts
+		}
+	}
+	return []Artifact{}
 }
