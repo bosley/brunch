@@ -17,6 +17,9 @@ const (
 	chatStoreDirectory = "chat-store"
 )
 
+// The brunch core handles the installes of and managment of chats and their related
+// llm provider info. The core is what executes the statements and is used to load/store
+// branchable chats
 type Core struct {
 	installDirectory string
 	providers        map[string]Provider
@@ -29,6 +32,21 @@ type Core struct {
 type CoreOpts struct {
 	InstallDirectory string
 	Providers        map[string]Provider
+}
+
+// The core handles the execution, and management-of chats and their related
+// providers, data, etc. However, the core is NOT the chat instance itself.
+// If a statement requests and audiance with an llm, the core chat request
+// will be handed back in the CoreStmtExecResult following the ExecuteStatement
+// call that requested it.
+type CoreChatRequest struct {
+	ChatName string // TODO: Once we actually go to do this, since the core stores the chats, we will load the object the external caller can utilize
+	ChatHash *string
+}
+
+type CoreStmtExecResult struct {
+	Error       error
+	ChatRequest *CoreChatRequest // This will be set iff \chat was called
 }
 
 // Create a new core instance with a set of
@@ -111,21 +129,32 @@ func (c *Core) SessionList() []string {
 // tree structure stuff and save the session - this is the manager for all active chat session
 // on the system. They will all center around the same install directory but may use different
 // providers to undergo taking on varyhing, distinct tasks under the project.
-func (c *Core) ExecuteStatement(sessionId string, stmt Statement) error {
+func (c *Core) ExecuteStatement(sessionId string, stmt Statement) CoreStmtExecResult {
 	c.sesMu.Lock()
 	defer c.sesMu.Unlock()
 	session, ok := c.sessions[sessionId]
 	if !ok {
-		return fmt.Errorf("session %s not found", sessionId)
+		return CoreStmtExecResult{Error: fmt.Errorf("session %s not found", sessionId)}
 	}
 
+	var cr *CoreChatRequest
 	callbacks := OperationalCallback{
 		OnNewChat:     c.NewChat,
 		OnNewProvider: c.AddProvider,
-		OnLoadChat:    c.LoadChat,
+		OnLoadChat: func(name string, hash *string) error {
+			cr = &CoreChatRequest{
+				ChatName: name,
+				ChatHash: hash,
+			}
+			return nil
+		},
 	}
 
-	return session.execute(stmt, callbacks)
+	err := session.execute(stmt, callbacks)
+	if err != nil {
+		return CoreStmtExecResult{Error: err}
+	}
+	return CoreStmtExecResult{ChatRequest: cr}
 }
 
 // Here we clone the provider handed to us and store in the provider map under a new name
@@ -169,15 +198,5 @@ func (c *Core) NewChat(name string, providerName string) error {
 	}
 
 	fmt.Println("NewChat", name, provider)
-	return errors.New("not implemented")
-}
-
-// Load the actual chat instance from the store and
-func (c *Core) LoadChat(name string, hash *string) error {
-	if hash != nil {
-		fmt.Println("LoadChat", name, "with hash", *hash)
-	} else {
-		fmt.Println("LoadChat", name, "without hash")
-	}
 	return errors.New("not implemented")
 }
