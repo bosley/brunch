@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/bosley/brunch"
 )
@@ -14,6 +17,10 @@ import (
 var loadDir *string
 var config *Config
 var chatEnabled bool
+
+const (
+	DefaultCommandKey uint8 = '\\'
+)
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -39,63 +46,100 @@ func main() {
 	}
 
 	client := clientFromSelectedProvider(config)
+	var chat *brunch.ChatInstance
 
-	brunchOpts := brunch.ReplOpts{
-		Provider:          client,
-		PreHook:           preHook,
-		PostHook:          postHook,
-		InterruptHandler:  interruptHandler,
-		CompletionHandler: completionHandler,
-		Commands: brunch.CommandOpts{
-			KeyOn:   brunch.DefaultCommandKey,
-			Handler: handleCommand,
-		},
-	}
-
-	var repl *brunch.Repl
 	if config.Snapshot != nil {
 		snap, err := brunch.SnapshotFromJSON(config.Snapshot)
 		if err != nil {
 			fmt.Println("failed to load snapshot", err)
 			os.Exit(1)
 		}
-		repl, err = brunch.NewReplFromSnapshot(brunchOpts, snap)
+		chat, err = brunch.NewChatInstanceFromSnapshot(client, snap)
 		if err != nil {
-			fmt.Println("failed to restore snapshot", err)
+			fmt.Println("failed to restore snapshot:", err)
 			os.Exit(1)
 		}
 		fmt.Println("loaded snapshot")
 	} else {
-		repl = brunch.NewRepl(brunchOpts)
+		chat = brunch.NewChatInstance(client)
 		fmt.Println("new chat")
 	}
 
 	welcome()
-
 	chatEnabled = true
-	repl.Run()
+	chat.ToggleChat(chatEnabled)
+
+	// Setup signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	done := make(chan bool)
+
+	// Start chat loop in goroutine
+	go func() {
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Println("Chat started. Press Ctrl+C to exit and view conversation tree.")
+		fmt.Println("Enter your messages (press Enter twice to send):")
+
+		for {
+			var lines []string
+			currentHash := chat.CurrentNode().Hash()[:8]
+			fmt.Printf("\n[%s]>  ", currentHash)
+
+			// Read until double Enter
+			for {
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					fmt.Printf("Error reading input: %v\n", err)
+					done <- true
+					return
+				}
+
+				line = strings.TrimSpace(line)
+				if line == "" && len(lines) > 0 {
+					break
+				}
+				if line != "" {
+					if strings.HasPrefix(line, string(DefaultCommandKey)) {
+						if err := handleCommand(chat, line); err != nil {
+							fmt.Println("Command failed:", err)
+						}
+						currentHash = chat.CurrentNode().Hash()[:8]
+						fmt.Printf("\n[%s]>  ", currentHash)
+					} else {
+						lines = append(lines, line)
+					}
+				}
+			}
+
+			if !chatEnabled {
+				fmt.Println("chat is disabled, skipping")
+				continue
+			}
+
+			question := strings.Join(lines, "\n")
+			response, err := chat.SubmitMessage(question)
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				continue
+			}
+
+			fmt.Println("assistant> ", response)
+		}
+	}()
+
+	select {
+	case <-sigChan:
+		if err := saveSnapshot(chat); err != nil {
+			fmt.Println("failed to save snapshot on interrupt:", err)
+		}
+	case <-done:
+		if err := saveSnapshot(chat); err != nil {
+			fmt.Println("failed to save snapshot on completion:", err)
+		}
+	}
 }
 
-func preHook(query *string) error {
-	//fmt.Printf("PreHook: %s\n", *query)
-	return nil
-}
-
-func postHook(response *string) error {
-	fmt.Println("assistant> ", *response)
-	return nil
-}
-
-func interruptHandler(node brunch.Node) {
-	//fmt.Println("InterruptHandler", brunch.PrintTree(node))
-}
-
-func completionHandler(node brunch.Node) {
-	//fmt.Println("CompletionHandler", brunch.PrintTree(node))
-
-}
-
-func handleCommand(panel brunch.Panel, nodeHash, line string) error {
+func handleCommand(panel brunch.Panel, line string) error {
 	parts := strings.Split(line, " ")
 	switch parts[0] {
 	case "\\?":
@@ -110,6 +154,7 @@ func handleCommand(panel brunch.Panel, nodeHash, line string) error {
 		fmt.Println("\t\\g: Go to node [traverse to a specific node by hash]")
 		fmt.Println("\t\\.: List children [list all children of the current node]")
 		fmt.Println("\t\\x: Toggle chat [toggle chat mode on/off - chat on by default press enter twice to send with no command leading]")
+		fmt.Println("\t\\a: List artifacts [display artifacts from current node]")
 		fmt.Println("\t\\q: Quit [save and quit]")
 	case "\\l":
 		fmt.Println(panel.PrintHistory())
@@ -176,6 +221,41 @@ func handleCommand(panel brunch.Panel, nodeHash, line string) error {
 		chatEnabled = !chatEnabled
 		panel.ToggleChat(chatEnabled)
 		fmt.Printf("chat enabled: %t\n", chatEnabled)
+	case "\\a":
+		artifacts := panel.Artifacts()
+		if len(artifacts) == 0 {
+			fmt.Println("No artifacts in current node")
+			return nil
+		}
+		fmt.Println("Artifacts in current node:")
+		for i, artifact := range artifacts {
+			switch artifact.Type() {
+			case brunch.ArtifactTypeFile:
+				if fa, ok := artifact.(*brunch.FileArtifact); ok {
+					fileType := "unknown"
+					if fa.FileType != nil {
+						fileType = *fa.FileType
+					}
+					name := "(no name given)"
+					if fa.Name != "" {
+						name = fa.Name
+					}
+					preview := fa.Data
+					if len(preview) > 50 {
+						preview = preview[:50] + "..."
+					}
+					fmt.Printf("\t%d: File [%s] Name: %s\n\t   Preview: %s\n", i, fileType, name, preview)
+				}
+			case brunch.ArtifactTypeNonFile:
+				if nfa, ok := artifact.(*brunch.NonFileArtifact); ok {
+					preview := nfa.Data
+					if len(preview) > 50 {
+						preview = preview[:50] + "..."
+					}
+					fmt.Printf("\t%d: Text: %s\n", i, preview)
+				}
+			}
+		}
 	case "\\q":
 		fmt.Println("saving back to loaded snapshot")
 		if err := saveSnapshot(panel); err != nil {

@@ -1,5 +1,4 @@
 all:
-	go build -o bru ./cmd/bru
-
+	go build -o brucli ./cmd/brucli
 clean:
-	rm -f bru
+	rm -f brucli

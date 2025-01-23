@@ -12,12 +12,22 @@ import (
 
 type NodeTyppe string
 
+type ProviderSettings struct {
+	BaseUrl      string
+	MaxTokens    int
+	Temperature  float64
+	SystemPrompt string
+}
+
 type Provider interface {
 	NewConversationRoot() RootNode
 	ExtendFrom(Node) MessageCreator
 	GetRoot(Node) RootNode
 	GetHistory(Node) []map[string]string
 	QueueImages([]string) error
+
+	Settings() ProviderSettings
+	CloneWithSettings(ProviderSettings) Provider
 }
 
 const (
