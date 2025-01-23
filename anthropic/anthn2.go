@@ -1,6 +1,9 @@
 package anthropic
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/bosley/brunch"
 )
 
@@ -127,4 +130,33 @@ func (ap *AnthropicProvider) GetHistory(node brunch.Node) []map[string]string {
 func (ap *AnthropicProvider) QueueImages(paths []string) error {
 	ap.pendingImages = append(ap.pendingImages, paths...)
 	return nil
+}
+
+func (ap *AnthropicProvider) Settings() brunch.ProviderSettings {
+	return brunch.ProviderSettings{
+		BaseUrl:      ap.client.apiEndpoint,
+		MaxTokens:    ap.client.maxTokens,
+		Temperature:  ap.client.temperature,
+		SystemPrompt: ap.client.systemPrompt,
+	}
+}
+
+func (ap *AnthropicProvider) CloneWithSettings(settings brunch.ProviderSettings) brunch.Provider {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		fmt.Println("Please set ANTHROPIC_API_KEY environment variable")
+		os.Exit(1)
+	}
+	client, err := New(
+		apiKey,
+		settings.SystemPrompt,
+		settings.Temperature,
+		settings.MaxTokens,
+	)
+	client.apiEndpoint = settings.BaseUrl
+	if err != nil {
+		fmt.Printf("Failed to create Anthropic client: %v\n", err)
+		os.Exit(1)
+	}
+	return NewAnthropicProvider(client)
 }

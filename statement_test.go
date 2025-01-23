@@ -25,33 +25,9 @@ func TestNewProviderCommand(t *testing.T) {
 			input:   `\new-provider "my-provider" :host 123`,
 			wantErr: true,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			stmt := NewStatement(tt.input)
-			err := stmt.Prepare()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewStatement().Prepare() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestNewRootCommand(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		wantErr bool
-	}{
 		{
-			name:    "valid new root command",
-			input:   `\new-root "some-root-for-task-A" :provider "my-provider"`,
-			wantErr: false,
-		},
-		{
-			name:    "missing provider property",
-			input:   `\new-root "some-root-for-task-A"`,
+			name:    "missing command name",
+			input:   `\new-provider :host "anthropic"`,
 			wantErr: true,
 		},
 	}
@@ -75,12 +51,17 @@ func TestNewChatCommand(t *testing.T) {
 	}{
 		{
 			name:    "valid new chat command",
-			input:   `\new-chat "example" :root "some-root-for-task-A"`,
+			input:   `\new-chat "example" :provider "my-provider"`,
 			wantErr: false,
 		},
 		{
-			name:    "missing root property",
+			name:    "missing provider property",
 			input:   `\new-chat "example"`,
+			wantErr: true,
+		},
+		{
+			name:    "missing command name",
+			input:   `\new-chat :provider "my-provider"`,
 			wantErr: true,
 		},
 	}
@@ -104,12 +85,22 @@ func TestChatCommand(t *testing.T) {
 	}{
 		{
 			name:    "valid chat command",
-			input:   `\chat "example" :restore`,
+			input:   `\chat "example"`,
 			wantErr: false,
 		},
 		{
-			name:    "missing restore property",
-			input:   `\chat "example"`,
+			name:    "missing command name",
+			input:   `\chat`,
+			wantErr: true,
+		},
+		{
+			name:    "with optional hash property",
+			input:   `\chat "example" :hash "123456"`,
+			wantErr: false,
+		},
+		{
+			name:    "with invalid property",
+			input:   `\chat "example" :invalid "value"`,
 			wantErr: true,
 		},
 	}
@@ -166,12 +157,12 @@ func TestParseProperty(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stmt := NewStatement(tt.input)
-			permitted := map[string]propertyType{
+			required := map[string]propertyType{
 				"host":        PropertyTypeString,
 				"max-tokens":  PropertyTypeInteger,
 				"temperature": PropertyTypeReal,
 			}
-			prop := stmt.parseProperty(permitted)
+			prop := stmt.parseProperty(required, nil)
 
 			if tt.wantErr {
 				if prop != nil {

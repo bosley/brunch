@@ -2,11 +2,46 @@ package brunch
 
 import "fmt"
 
+type Statement struct {
+	content string
+	idx     int
+	tokens  []token
+	cmd     *cmd
+}
+
+func (p *Statement) Reset() {
+	p.idx = 0
+	p.tokens = []token{}
+	p.cmd = nil
+}
+
+func (p *Statement) IsPrepared() bool {
+	return p.cmd != nil
+}
+
+func (p *Statement) Prepare() error {
+
+	if p.cmd != nil {
+		p.cmd = nil
+	}
+
+	if err := p.tokenize(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+type cmd struct {
+	keyword    string
+	nameGiven  string
+	properties map[string]*property
+}
+
 type tokenType int
 
 const (
 	TokenTypeNewProviderCmd tokenType = iota
-	TokenTypeNewRootCmd
 	TokenTypeNewChatCmd
 	TokenTypeChatCmd
 	TokenTypePropertyTag
@@ -29,55 +64,28 @@ type token struct {
 	value     string
 }
 
-type Statement interface {
-	Prepare() error
-}
-
-type cmd struct {
-	keyword    string
-	properties map[string]*property
-}
-
-type stmt struct {
-	content string
-	idx     int
-
-	tokens []token
-
-	cmd *cmd
-}
-
 type property struct {
 	id   string
 	prop string
 	typ  propertyType
 }
 
-func NewStatement(content string) *stmt {
-	return &stmt{
+func NewStatement(content string) *Statement {
+	return &Statement{
 		content: content,
 		idx:     0,
+		tokens:  []token{},
+		cmd:     nil,
 	}
 }
 
-func (p *stmt) Prepare() error {
-
-	fmt.Println("prepare")
-
-	if err := p.tokenize(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (p *stmt) skipWhitespace() {
+func (p *Statement) skipWhitespace() {
 	for p.idx < len(p.content) && (p.content[p.idx] == ' ' || p.content[p.idx] == '\t') {
 		p.idx++
 	}
 }
 
-func (p *stmt) tokenize() error {
+func (p *Statement) tokenize() error {
 	for p.idx < len(p.content) {
 		p.skipWhitespace()
 
@@ -93,40 +101,71 @@ func (p *stmt) tokenize() error {
 			start := p.idx
 			p.idx++
 
+			// Parse command keyword
 			for p.idx < len(p.content) && p.content[p.idx] != ' ' {
 				p.idx++
 			}
 
-			cmd := p.content[start:p.idx]
-			var err error
-			switch cmd {
+			cmdStr := p.content[start:p.idx]
+			switch cmdStr {
 			case "\\new-provider":
-				err = p.buildNewProviderCommand()
-			case "\\new-root":
-				err = p.buildNewRootCommand()
+				p.cmd = &cmd{
+					keyword:    "new-provider",
+					properties: make(map[string]*property),
+				}
+				p.tokens = append(p.tokens, token{
+					pos:       start,
+					tokenType: TokenTypeNewProviderCmd,
+					value:     cmdStr,
+				})
 			case "\\new-chat":
-				err = p.buildNewChatCommand()
+				p.cmd = &cmd{
+					keyword:    "new-chat",
+					properties: make(map[string]*property),
+				}
+				p.tokens = append(p.tokens, token{
+					pos:       start,
+					tokenType: TokenTypeNewChatCmd,
+					value:     cmdStr,
+				})
 			case "\\chat":
-				err = p.buildChatCommand()
+				p.cmd = &cmd{
+					keyword:    "chat",
+					properties: make(map[string]*property),
+				}
+				p.tokens = append(p.tokens, token{
+					pos:       start,
+					tokenType: TokenTypeChatCmd,
+					value:     cmdStr,
+				})
 			default:
-				return fmt.Errorf("unknown command: %s", cmd)
+				return fmt.Errorf("unknown command: %s", cmdStr)
 			}
 
-			if err != nil {
-				return err
-			}
-
+			// Skip whitespace after command
 			p.skipWhitespace()
 
-			if p.idx < len(p.content) && p.content[p.idx] == '"' {
-				if prop := p.parseString(); prop == nil {
-					return fmt.Errorf("invalid command name string at position %d", p.idx)
-				}
-				p.skipWhitespace()
+			// Parse command name (must be a quoted string)
+			if p.idx >= len(p.content) {
+				return fmt.Errorf("missing command name at position %d", p.idx)
 			}
 
+			if p.content[p.idx] != '"' {
+				return fmt.Errorf("expected command name to start with '\"' at position %d", p.idx)
+			}
+
+			nameToken := p.parseString()
+			if nameToken == nil {
+				return fmt.Errorf("invalid command name at position %d", p.idx)
+			}
+
+			p.cmd.nameGiven = nameToken.prop
+
+			// Now parse properties based on command type
 			var requiredProps map[string]propertyType
-			switch cmd {
+			var optionalProps map[string]propertyType
+
+			switch cmdStr {
 			case "\\new-provider":
 				requiredProps = map[string]propertyType{
 					"host":          PropertyTypeString,
@@ -135,20 +174,18 @@ func (p *stmt) tokenize() error {
 					"temperature":   PropertyTypeReal,
 					"system-prompt": PropertyTypeString,
 				}
-			case "\\new-root":
+			case "\\new-chat":
 				requiredProps = map[string]propertyType{
 					"provider": PropertyTypeString,
 				}
-			case "\\new-chat":
-				requiredProps = map[string]propertyType{
-					"root": PropertyTypeString,
-				}
 			case "\\chat":
-				requiredProps = map[string]propertyType{
-					"restore": PropertyTypeString,
+				requiredProps = map[string]propertyType{}
+				optionalProps = map[string]propertyType{
+					"hash": PropertyTypeString,
 				}
 			}
-			return p.parseProperties(requiredProps)
+
+			return p.parseProperties(requiredProps, optionalProps)
 		case ':':
 			return nil
 		default:
@@ -158,91 +195,7 @@ func (p *stmt) tokenize() error {
 	return nil
 }
 
-func (p *stmt) buildNewProviderCommand() error {
-	p.cmd = &cmd{
-		keyword:    "new-provider",
-		properties: make(map[string]*property),
-	}
-
-	p.tokens = append(p.tokens, token{
-		pos:       p.idx,
-		tokenType: TokenTypeNewProviderCmd,
-		value:     "\\new-provider",
-	})
-
-	// Required properties for new-provider
-	requiredProps := map[string]propertyType{
-		"host":          PropertyTypeString,
-		"base-url":      PropertyTypeString,
-		"max-tokens":    PropertyTypeInteger,
-		"temperature":   PropertyTypeReal,
-		"system-prompt": PropertyTypeString,
-	}
-
-	return p.parseProperties(requiredProps)
-}
-
-func (p *stmt) buildNewRootCommand() error {
-	p.cmd = &cmd{
-		keyword:    "new-root",
-		properties: make(map[string]*property),
-	}
-
-	p.tokens = append(p.tokens, token{
-		pos:       p.idx,
-		tokenType: TokenTypeNewRootCmd,
-		value:     "\\new-root",
-	})
-
-	// Required properties for new-root
-	requiredProps := map[string]propertyType{
-		"provider": PropertyTypeString,
-	}
-
-	return p.parseProperties(requiredProps)
-}
-
-func (p *stmt) buildNewChatCommand() error {
-	p.cmd = &cmd{
-		keyword:    "new-chat",
-		properties: make(map[string]*property),
-	}
-
-	p.tokens = append(p.tokens, token{
-		pos:       p.idx,
-		tokenType: TokenTypeNewChatCmd,
-		value:     "\\new-chat",
-	})
-
-	// Required properties for new-chat
-	requiredProps := map[string]propertyType{
-		"root": PropertyTypeString,
-	}
-
-	return p.parseProperties(requiredProps)
-}
-
-func (p *stmt) buildChatCommand() error {
-	p.cmd = &cmd{
-		keyword:    "chat",
-		properties: make(map[string]*property),
-	}
-
-	p.tokens = append(p.tokens, token{
-		pos:       p.idx,
-		tokenType: TokenTypeChatCmd,
-		value:     "\\chat",
-	})
-
-	// Required properties for chat
-	requiredProps := map[string]propertyType{
-		"restore": PropertyTypeString,
-	}
-
-	return p.parseProperties(requiredProps)
-}
-
-func (p *stmt) parseProperties(required map[string]propertyType) error {
+func (p *Statement) parseProperties(required map[string]propertyType, optional map[string]propertyType) error {
 	for p.idx < len(p.content) {
 		p.skipWhitespace()
 
@@ -255,7 +208,7 @@ func (p *stmt) parseProperties(required map[string]propertyType) error {
 			continue
 		}
 
-		prop := p.parseProperty(required)
+		prop := p.parseProperty(required, optional)
 		if prop == nil {
 			return fmt.Errorf("failed to parse property at position %d", p.idx)
 		}
@@ -274,7 +227,7 @@ func (p *stmt) parseProperties(required map[string]propertyType) error {
 	return nil
 }
 
-func (p *stmt) parseProperty(permitted map[string]propertyType) *property {
+func (p *Statement) parseProperty(required map[string]propertyType, optional map[string]propertyType) *property {
 	if p.idx >= len(p.content) || p.content[p.idx] != ':' {
 		return nil
 	}
@@ -295,23 +248,18 @@ func (p *stmt) parseProperty(permitted map[string]propertyType) *property {
 	propertyName := p.content[start:p.idx]
 	p.skipWhitespace()
 
-	typ, exists := permitted[propertyName]
+	typ, exists := required[propertyName]
 	if !exists {
-		return nil
+		typ, exists = optional[propertyName]
+		if !exists {
+			return nil
+		}
 	}
 
 	var prop *property
 	switch typ {
 	case PropertyTypeString:
-		// Special case for flag-like properties (e.g. :restore)
-		if propertyName == "restore" {
-			prop = &property{
-				prop: propertyName,
-				typ:  PropertyTypeString,
-			}
-		} else {
-			prop = p.parseString()
-		}
+		prop = p.parseString()
 	case PropertyTypeInteger:
 		prop = p.parseInteger()
 	case PropertyTypeReal:
@@ -329,7 +277,7 @@ func isIdentifierChar(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
 }
 
-func (p *stmt) parseString() *property {
+func (p *Statement) parseString() *property {
 	if p.idx >= len(p.content) || p.content[p.idx] != '"' {
 		return nil
 	}
@@ -351,7 +299,7 @@ func (p *stmt) parseString() *property {
 	return nil // Unterminated string
 }
 
-func (p *stmt) parseInteger() *property {
+func (p *Statement) parseInteger() *property {
 	if p.idx >= len(p.content) {
 		return nil
 	}
@@ -381,7 +329,7 @@ func (p *stmt) parseInteger() *property {
 	}
 }
 
-func (p *stmt) parseReal() *property {
+func (p *Statement) parseReal() *property {
 	if p.idx >= len(p.content) {
 		return nil
 	}
@@ -394,16 +342,12 @@ func (p *stmt) parseReal() *property {
 		p.idx++
 	}
 
-	// Must have at least one digit before or after decimal
 	hasDigits := false
-
-	// Parse integer part
 	for p.idx < len(p.content) && isDigit(p.content[p.idx]) {
 		hasDigits = true
 		p.idx++
 	}
 
-	// Parse decimal part if present
 	if p.idx < len(p.content) && p.content[p.idx] == '.' {
 		p.idx++
 		for p.idx < len(p.content) && isDigit(p.content[p.idx]) {
