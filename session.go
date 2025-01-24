@@ -64,7 +64,7 @@ func (c *Core) NewSession(opts SessionOpts) (*coreSession, error) {
 }
 
 // Send a statement to the session
-func (s *coreSession) execute(stmt Statement, callbacks OperationalCallback) error {
+func (s *coreSession) execute(stmt *Statement, callbacks OperationalCallback) error {
 
 	if !stmt.IsPrepared() {
 		if err := stmt.Prepare(); err != nil {
@@ -94,7 +94,7 @@ func (s *coreSession) execute(stmt Statement, callbacks OperationalCallback) err
 	return errors.New("not implemented")
 }
 
-func (s *coreSession) validateProperties(stmt Statement) error {
+func (s *coreSession) validateProperties(stmt *Statement) error {
 	for _, prop := range stmt.cmd.properties {
 		if !s.isPropertyValid(prop) {
 			return fmt.Errorf("invalid property: %s", prop.id)

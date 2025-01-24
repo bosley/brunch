@@ -6,6 +6,7 @@ import (
 )
 
 type Snapshot struct {
+	ProviderName string `json:"provider_name"`
 	ActiveBranch string `json:"active_branch"`
 	Contents     []byte `json:"contents"`
 }

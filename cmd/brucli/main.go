@@ -12,11 +12,19 @@ import (
 	"syscall"
 
 	"github.com/bosley/brunch"
+	"github.com/bosley/brunch/anthropic"
 )
 
 var loadDir *string
-var config *Config
 var chatEnabled bool
+
+var core *brunch.Core
+
+var baseProviders = map[string]brunch.Provider{
+	"anthropic": anthropic.InitialAnthropicProvider(),
+}
+
+const sessionId = "cli-chat"
 
 const (
 	DefaultCommandKey uint8 = '\\'
@@ -31,39 +39,55 @@ func main() {
 	loadDir = flag.String("load", ".", "Load directory containing insu.yaml")
 	flag.Parse()
 
-	var err error
-	config, err = LoadFromDir(*loadDir)
-	if err != nil {
-		if err := InitDirectory(*loadDir); err != nil {
-			fmt.Println("Failed to initialize directory:", err)
-			os.Exit(1)
-		}
-		config, err = LoadFromDir(*loadDir)
-		if err != nil {
-			fmt.Println("Failed to load config:", err)
+	core = brunch.NewCore(brunch.CoreOpts{
+		InstallDirectory: *loadDir,
+		BaseProviders:    baseProviders,
+	})
+
+	if !core.IsInstalled() {
+		if err := core.Install(); err != nil {
+			fmt.Println("Failed to install core:", err)
 			os.Exit(1)
 		}
 	}
 
-	client := clientFromSelectedProvider(config)
-	var chat *brunch.ChatInstance
+	doRepl()
+}
+func doRepl() {
+	reader := bufio.NewReader(os.Stdin)
 
-	if config.Snapshot != nil {
-		snap, err := brunch.SnapshotFromJSON(config.Snapshot)
+	for {
+		fmt.Print(">")
+		line, err := reader.ReadString('\n')
 		if err != nil {
-			fmt.Println("failed to load snapshot", err)
-			os.Exit(1)
+			fmt.Printf("Error reading input: %v\n", err)
+			continue
 		}
-		chat, err = brunch.NewChatInstanceFromSnapshot(client, snap)
-		if err != nil {
-			fmt.Println("failed to restore snapshot:", err)
-			os.Exit(1)
+
+		statement := strings.TrimSpace(line)
+		if statement == "\\quit" || statement == "\\exit" {
+			return
 		}
-		fmt.Println("loaded snapshot")
-	} else {
-		chat = brunch.NewChatInstance(client)
-		fmt.Println("new chat")
+
+		stmt := brunch.NewStatement(statement)
+		if err := stmt.Prepare(); err != nil {
+			fmt.Printf("Error preparing statement: %v\n", err)
+			continue
+		}
+
+		req := core.ExecuteStatement(sessionId, stmt)
+		if req.Error != nil {
+			fmt.Printf("Error: %v\n", req.Error)
+			continue
+		}
+
+		if req.ChatRequest != nil {
+			doChat(req.ChatRequest.LoadedInstance)
+		}
 	}
+}
+
+func doChat(chat *brunch.ChatInstance) {
 
 	welcome()
 	chatEnabled = true
@@ -129,11 +153,11 @@ func main() {
 
 	select {
 	case <-sigChan:
-		if err := saveSnapshot(chat); err != nil {
+		if err := saveSnapshot(); err != nil {
 			fmt.Println("failed to save snapshot on interrupt:", err)
 		}
 	case <-done:
-		if err := saveSnapshot(chat); err != nil {
+		if err := saveSnapshot(); err != nil {
 			fmt.Println("failed to save snapshot on completion:", err)
 		}
 	}
@@ -169,7 +193,7 @@ func handleCommand(panel brunch.Panel, line string) error {
 			return err
 		}
 	case "\\s":
-		saveSnapshot(panel)
+		saveSnapshot()
 	case "\\p":
 		if err := panel.Parent(); err != nil {
 			fmt.Println("failed to go to parent", err)
@@ -258,7 +282,7 @@ func handleCommand(panel brunch.Panel, line string) error {
 		}
 	case "\\q":
 		fmt.Println("saving back to loaded snapshot")
-		if err := saveSnapshot(panel); err != nil {
+		if err := saveSnapshot(); err != nil {
 			fmt.Println("failed to save snapshot", err)
 			os.Exit(1)
 		}
@@ -268,22 +292,8 @@ func handleCommand(panel brunch.Panel, line string) error {
 	return nil
 }
 
-func saveSnapshot(panel brunch.Panel) error {
-	snapshot, e := panel.Snapshot()
-	if e != nil {
-		fmt.Println("failed to take snapshot", e)
-		return e
-	}
-	config.Snapshot, e = snapshot.Marshal()
-	if e != nil {
-		fmt.Println("failed to marshal snapshot", e)
-		return e
-	}
-	if e := config.Save(*loadDir); e != nil {
-		fmt.Println("failed to save config", e)
-		return e
-	}
-	return nil
+func saveSnapshot() error {
+	return core.SaveActiveChat(sessionId)
 }
 
 func welcome() {

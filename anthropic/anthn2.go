@@ -14,6 +14,25 @@ type AnthropicProvider struct {
 
 var _ brunch.Provider = (*AnthropicProvider)(nil)
 
+func InitialAnthropicProvider() brunch.Provider {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		fmt.Println("Please set ANTHROPIC_API_KEY environment variable")
+		os.Exit(1)
+	}
+	client, err := New(
+		apiKey,
+		"",
+		0.7,
+		4000,
+	)
+	if err != nil {
+		fmt.Printf("Failed to create Anthropic client: %v\n", err)
+		os.Exit(1)
+	}
+	return NewAnthropicProvider(client)
+}
+
 func NewAnthropicProvider(client *Client) *AnthropicProvider {
 	return &AnthropicProvider{
 		client:        client,

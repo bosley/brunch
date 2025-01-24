@@ -13,10 +13,12 @@ import (
 type NodeTyppe string
 
 type ProviderSettings struct {
-	BaseUrl      string
-	MaxTokens    int
-	Temperature  float64
-	SystemPrompt string
+	Name         string  `json:"name"`
+	Host         string  `json:"host"`
+	BaseUrl      string  `json:"base_url"`
+	MaxTokens    int     `json:"max_tokens"`
+	Temperature  float64 `json:"temperature"`
+	SystemPrompt string  `json:"system_prompt"`
 }
 
 type Provider interface {

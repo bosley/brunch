@@ -182,7 +182,7 @@ func TestSession_Execute(t *testing.T) {
 			}
 
 			// Execute statement
-			err := session.execute(*stmt, callbacks)
+			err := session.execute(stmt, callbacks)
 
 			// Check error expectation
 			if (err != nil) != tt.wantErr {
