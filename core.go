@@ -169,7 +169,6 @@ func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) CoreStmtExecR
 	{
 		var ok bool
 		c.sesMu.Lock()
-		defer c.sesMu.Unlock()
 		session, ok = c.sessions[sessionId]
 		if !ok {
 			session = &coreSession{
@@ -177,10 +176,7 @@ func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) CoreStmtExecR
 			}
 			c.sessions[sessionId] = session
 		}
-
-		// TODO: DO NOT DELETE THIS UNTIL ITS FUCKING DONE
-		// TODO: When the user exits/ we need to kill the session
-		// 			which should be done statement-wise (i.e. when the user submits a statement)
+		c.sesMu.Unlock()
 	}
 
 	var cr *CoreChatRequest
@@ -214,25 +210,37 @@ func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) CoreStmtExecR
 // the settings to store in provider map
 func (c *Core) newProviderFromStatement(name string, host string, baseUrl string, maxTokens int, temperature float64, systemPrompt string) error {
 
+	fmt.Println("name:", name, "host", host)
 	var baseProvider Provider
 	{
 		var exists bool
 		c.provMu.Lock()
-		defer c.provMu.Unlock()
 		_, exists = c.providers[name]
 		if exists {
+			c.provMu.Unlock()
 			return fmt.Errorf("provider [%s] already exists", name)
 		}
 
 		baseProvider, exists = c.providers[host]
 		if !exists {
+			c.provMu.Unlock()
 			return fmt.Errorf("host provider (base provider) [%s] does not exist", host)
 		}
+		c.provMu.Unlock()
+	}
+
+	if maxTokens == 0 || maxTokens > baseProvider.Settings().MaxTokens {
+		fmt.Println("maxTokens is 0, setting to default")
+		maxTokens = baseProvider.Settings().MaxTokens
+	}
+
+	if temperature == 0.0 || temperature > 1.0 {
+		fmt.Println("temperature is 0 or greater than 1, setting to default")
+		temperature = baseProvider.Settings().Temperature
 	}
 
 	// We "duplicate" checks, but who the fuck cares. Do this and save it to disk.
-	return c.AddProvider(baseProvider.CloneWithSettings(ProviderSettings{
-		Name:         name,
+	return c.AddProvider(name, baseProvider.CloneWithSettings(ProviderSettings{
 		Host:         host,
 		BaseUrl:      baseUrl,
 		MaxTokens:    maxTokens,
@@ -245,17 +253,18 @@ func (c *Core) newProviderFromStatement(name string, host string, baseUrl string
 // given to us by the user so they can reference that particular incarnation of the provider
 // in their chat sessions (host: is the base provider like "anthropic" or "openai" etc whatever is setup
 // by hand from config oin core init)
-func (c *Core) AddProvider(p Provider) error {
-	fmt.Println("Adding provider", p.Settings().Name)
+func (c *Core) AddProvider(name string, p Provider) error {
+	fmt.Println("Adding provider", name)
 
+	// WHY DO YOU IGNORE LEXICAL SCOPES GOLANG?!?!?
 	c.provMu.Lock()
-	defer c.provMu.Unlock()
-
-	_, existsAlready := c.providers[p.Settings().Name]
+	_, existsAlready := c.providers[name]
 	if existsAlready {
-		return fmt.Errorf("provider [%s] already exists", p.Settings().Name)
+		c.provMu.Unlock()
+		return fmt.Errorf("provider [%s] already exists", name)
 	}
-	c.providers[p.Settings().Name] = p
+	c.providers[name] = p
+	c.provMu.Unlock()
 
 	// Convert the settings to JSON format for saving to disk
 	var settingsBytes []byte
@@ -267,7 +276,7 @@ func (c *Core) AddProvider(p Provider) error {
 	}
 
 	// Save with a good, roman name, and then return
-	sanitizedName := strings.ReplaceAll(settings.Name, " ", "_")
+	sanitizedName := strings.ReplaceAll(name, " ", "_")
 	return c.addToProviderStore(fmt.Sprintf("%s.json", sanitizedName), string(settingsBytes))
 }
 
@@ -309,8 +318,6 @@ func (c *Core) NewChat(name string, providerName string) error {
 	{
 		c.provMu.Lock()
 		defer c.provMu.Unlock()
-
-		fmt.Println("chat: ", name, providerName)
 
 		provider, ok := c.providers[providerName]
 

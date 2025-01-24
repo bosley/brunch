@@ -7,6 +7,12 @@ import (
 	"github.com/bosley/brunch"
 )
 
+const (
+	DefaultTemperature = 0.7
+	DefaultMaxTokens   = 4000
+	AbsoluteMaxTokens  = 4096
+)
+
 type AnthropicProvider struct {
 	client        *Client
 	pendingImages []string
@@ -31,6 +37,10 @@ func InitialAnthropicProvider() brunch.Provider {
 		os.Exit(1)
 	}
 	return NewAnthropicProvider(client)
+}
+
+func (ap *AnthropicProvider) MaxTokens() int {
+	return ap.client.maxTokens
 }
 
 func NewAnthropicProvider(client *Client) *AnthropicProvider {

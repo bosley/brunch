@@ -168,11 +168,13 @@ func (p *Statement) tokenize() error {
 			switch cmdStr {
 			case "\\new-provider":
 				requiredProps = map[string]propertyType{
-					"host":          PropertyTypeString,
+					"host": PropertyTypeString,
+				}
+				optionalProps = map[string]propertyType{
 					"base-url":      PropertyTypeString,
+					"system-prompt": PropertyTypeString,
 					"max-tokens":    PropertyTypeInteger,
 					"temperature":   PropertyTypeReal,
-					"system-prompt": PropertyTypeString,
 				}
 			case "\\new-chat":
 				requiredProps = map[string]propertyType{
