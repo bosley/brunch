@@ -20,15 +20,7 @@ var chatEnabled bool
 
 var core *brunch.Core
 
-var baseProviders = map[string]brunch.Provider{
-	"anthropic": anthropic.InitialAnthropicProvider(),
-}
-
-const sessionId = "cli-chat"
-
-const (
-	DefaultCommandKey uint8 = '\\'
-)
+const sessionId = "cli-session"
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -36,12 +28,14 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	loadDir = flag.String("load", ".", "Load directory containing insu.yaml")
+	loadDir = flag.String("load", "/tmp/brunch", "Load directory containing insu.yaml")
 	flag.Parse()
 
 	core = brunch.NewCore(brunch.CoreOpts{
 		InstallDirectory: *loadDir,
-		BaseProviders:    baseProviders,
+		BaseProviders: map[string]brunch.Provider{
+			"anthropic": anthropic.InitialAnthropicProvider(),
+		},
 	})
 
 	if !core.IsInstalled() {
@@ -65,8 +59,13 @@ func doRepl() {
 		}
 
 		statement := strings.TrimSpace(line)
-		if statement == "\\quit" || statement == "\\exit" {
+		if statement == "quit" || statement == "exit" {
 			return
+		}
+
+		if !strings.HasPrefix(statement, "\\") {
+			fmt.Println("invalid brunch command")
+			continue
 		}
 
 		stmt := brunch.NewStatement(statement)
@@ -90,7 +89,7 @@ func doRepl() {
 func doChat(chat *brunch.ChatInstance) {
 
 	welcome()
-	chatEnabled = true
+	chatEnabled = false
 	chat.ToggleChat(chatEnabled)
 
 	// Setup signal handling
@@ -123,7 +122,7 @@ func doChat(chat *brunch.ChatInstance) {
 					break
 				}
 				if line != "" {
-					if strings.HasPrefix(line, string(DefaultCommandKey)) {
+					if strings.HasPrefix(line, "\\") {
 						if err := handleCommand(chat, line); err != nil {
 							fmt.Println("Command failed:", err)
 						}
@@ -286,6 +285,7 @@ func handleCommand(panel brunch.Panel, line string) error {
 			fmt.Println("failed to save snapshot", err)
 			os.Exit(1)
 		}
+		core.EndSession(sessionId)
 		fmt.Println("quit")
 		os.Exit(0)
 	}

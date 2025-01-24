@@ -289,7 +289,7 @@ func (p *Statement) parseString() *property {
 		if p.content[p.idx] == '"' && (p.idx == 0 || p.content[p.idx-1] != '\\') {
 			p.idx++ // Skip closing quote
 			return &property{
-				prop: p.content[start:p.idx],
+				prop: p.content[start+1 : p.idx-1],
 				typ:  PropertyTypeString,
 			}
 		}

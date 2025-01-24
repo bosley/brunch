@@ -141,10 +141,7 @@ func TestSession_Execute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a new session
-			session := &coreSession{
-				id:        "test-session",
-				directory: t.TempDir(),
-			}
+			session := &coreSession{}
 
 			// Create statement
 			stmt := NewStatement(tt.content)

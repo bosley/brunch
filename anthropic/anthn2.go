@@ -157,6 +157,7 @@ func (ap *AnthropicProvider) Settings() brunch.ProviderSettings {
 		MaxTokens:    ap.client.maxTokens,
 		Temperature:  ap.client.temperature,
 		SystemPrompt: ap.client.systemPrompt,
+		Name:         "anthropic",
 	}
 }
 

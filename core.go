@@ -65,7 +65,7 @@ type CoreStmtExecResult struct {
 func NewCore(opts CoreOpts) *Core {
 	return &Core{
 		installDirectory: opts.InstallDirectory,
-		providers:        make(map[string]Provider),
+		providers:        opts.BaseProviders,
 		sessions:         make(map[string]*coreSession),
 		activeChats:      make(map[string]*ChatInstance),
 		baseProviders:    opts.BaseProviders,
@@ -92,6 +92,10 @@ func (c *Core) SetAvailableProviders(providers map[string]Provider) {
 func (c *Core) Install() error {
 	if c.installDirectory == "" {
 		return errors.New("install directory is required")
+	}
+
+	if c.IsInstalled() {
+		return fmt.Errorf("target dir already exists: %s", c.installDirectory)
 	}
 
 	dirs := []string{
@@ -137,6 +141,17 @@ func (c *Core) SessionList() []string {
 	return sessions
 }
 
+func (c *Core) EndSession(sessionId string) error {
+	c.sesMu.Lock()
+	defer c.sesMu.Unlock()
+	_, ok := c.sessions[sessionId]
+	if !ok {
+		return fmt.Errorf("session %s not found", sessionId)
+	}
+	delete(c.sessions, sessionId)
+	return nil
+}
+
 func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) CoreStmtExecResult {
 
 	if stmt == nil {
@@ -149,11 +164,23 @@ func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) CoreStmtExecR
 	}
 	sessionId = sanitized
 
-	c.sesMu.Lock()
-	defer c.sesMu.Unlock()
-	session, ok := c.sessions[sessionId]
-	if !ok {
-		return CoreStmtExecResult{Error: fmt.Errorf("session %s not found", sessionId)}
+	var session *coreSession
+
+	{
+		var ok bool
+		c.sesMu.Lock()
+		defer c.sesMu.Unlock()
+		session, ok = c.sessions[sessionId]
+		if !ok {
+			session = &coreSession{
+				id: sessionId,
+			}
+			c.sessions[sessionId] = session
+		}
+
+		// TODO: DO NOT DELETE THIS UNTIL ITS FUCKING DONE
+		// TODO: When the user exits/ we need to kill the session
+		// 			which should be done statement-wise (i.e. when the user submits a statement)
 	}
 
 	var cr *CoreChatRequest
@@ -168,6 +195,9 @@ func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) CoreStmtExecR
 			cr = &CoreChatRequest{
 				LoadedInstance: ci,
 			}
+
+			// Set the chat name in the session so we can track it from the user (who knows how many chats theyll have so we tie per-session)
+			session.activeChatId = name
 			return nil
 		},
 	}
@@ -280,32 +310,49 @@ func (c *Core) NewChat(name string, providerName string) error {
 		c.provMu.Lock()
 		defer c.provMu.Unlock()
 
+		fmt.Println("chat: ", name, providerName)
+
 		provider, ok := c.providers[providerName]
+
 		if !ok {
+			for name, prov := range c.providers {
+				fmt.Println("PROVIDER", name, prov.Settings().Name)
+			}
 			return fmt.Errorf("provider [%s] not found", providerName)
 		}
 
 		baseSettings := provider.Settings()
 		baseSettings.Name = name
 
-		chat = NewChatInstance(provider)
+		chat = NewChatInstance(provider.CloneWithSettings(baseSettings))
 	}
 
 	return c.writeSnapshot(name, chat)
 }
 
-func (c *Core) SaveActiveChat(chatName string) error {
-	var exists bool
+func (c *Core) SaveActiveChat(sessionName string) error {
+	var target string
 	var chat *ChatInstance
 	{
-		c.chatMu.Lock()
-		defer c.chatMu.Unlock()
-		chat, exists = c.activeChats[chatName]
+		c.sesMu.Lock()
+		session, exists := c.sessions[sessionName]
+		c.sesMu.Unlock()
+
 		if !exists {
-			return fmt.Errorf("chat %s is not active", chatName)
+			return fmt.Errorf("session [%s] does not exist", sessionName)
+		}
+
+		target = session.activeChatId
+
+		c.chatMu.Lock()
+		chat, exists = c.activeChats[target]
+		c.chatMu.Unlock()
+
+		if !exists {
+			return fmt.Errorf("chat [%s] is not active", target)
 		}
 	}
-	return c.writeSnapshot(chatName, chat)
+	return c.writeSnapshot(target, chat)
 }
 
 func (c *Core) writeSnapshot(ssName string, chat *ChatInstance) error {
@@ -326,13 +373,19 @@ func (c *Core) writeSnapshot(ssName string, chat *ChatInstance) error {
 func (c *Core) loadChat(name string, hash *string) (*ChatInstance, error) {
 	{
 		c.chatMu.Lock()
-		defer c.chatMu.Unlock()
 		chat, exists := c.activeChats[name]
+		c.chatMu.Unlock()
 		if exists {
 			return chat, nil
 		}
 	}
-	snapshotRaw, err := c.LoadFromChatStore(name)
+
+	fileName := name
+	if !strings.HasSuffix(fileName, ".json") {
+		fileName = fmt.Sprintf("%s.json", name)
+	}
+
+	snapshotRaw, err := c.LoadFromChatStore(fileName)
 	if err != nil {
 		return nil, err
 	}
@@ -354,8 +407,8 @@ func (c *Core) loadChat(name string, hash *string) (*ChatInstance, error) {
 	// Add to active chats
 	{
 		c.chatMu.Lock()
-		defer c.chatMu.Unlock()
 		c.activeChats[name] = chat
+		c.chatMu.Unlock()
 	}
 	return chat, nil
 }
