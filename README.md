@@ -1,11 +1,11 @@
 # brunch
 
-Requires: 
+Requires:
 
 - `ANTHROPIC_API_KEY` environment variable set
 
 ```bash
- ~/workspace/brunch/ [mods*] make                   
+ ~/workspace/brunch/ [mods*] make
 go build -o bru ./cmd/bru
 
  ~/workspace/brunch/ [mods*] ./bru
@@ -35,5 +35,27 @@ Commands:
         \x: Toggle chat [toggle chat mode on/off - chat on by default press enter twice to send with no command leading]
         \q: Quit [save and quit]
 
-55eb949f> 
+55eb949f>
+```
+
+
+```
+1. `\new-provider "name"`
+   - Creates a new provider
+   - Required properties:
+     - `:host` (string)
+     - `:base-url` (string)
+     - `:max-tokens` (integer)
+     - `:temperature` (real/float)
+     - `:system-prompt` (string)
+
+2. `\new-chat "name"`
+   - Creates a new chat
+   - Required properties:
+     - `:provider` (string)
+
+3. `\chat "name"`
+   - Interacts with an existing chat
+   - Optional properties:
+     - `:hash` (string)
 ```

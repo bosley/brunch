@@ -7,23 +7,58 @@ import (
 	"github.com/bosley/brunch"
 )
 
+const (
+	DefaultTemperature = 0.7
+	DefaultMaxTokens   = 4000
+	AbsoluteMaxTokens  = 4096
+)
+
 type AnthropicProvider struct {
 	client        *Client
 	pendingImages []string
+
+	providerName     string
+	hostProviderName string
 }
 
 var _ brunch.Provider = (*AnthropicProvider)(nil)
 
-func NewAnthropicProvider(client *Client) *AnthropicProvider {
+func InitialAnthropicProvider() brunch.Provider {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		fmt.Println("Please set ANTHROPIC_API_KEY environment variable")
+		os.Exit(1)
+	}
+	client, err := New(
+		"anthropic",
+		apiKey,
+		"",
+		0.7,
+		4000,
+	)
+	if err != nil {
+		fmt.Printf("Failed to create Anthropic client: %v\n", err)
+		os.Exit(1)
+	}
+	return NewAnthropicProvider("anthropic", "anthropic", client)
+}
+
+func (ap *AnthropicProvider) MaxTokens() int {
+	return ap.client.maxTokens
+}
+
+func NewAnthropicProvider(host, name string, client *Client) *AnthropicProvider {
 	return &AnthropicProvider{
-		client:        client,
-		pendingImages: []string{},
+		providerName:     name,
+		hostProviderName: host,
+		client:           client,
+		pendingImages:    []string{},
 	}
 }
 
 func (ap *AnthropicProvider) NewConversationRoot() brunch.RootNode {
 	return *brunch.NewRootNode(brunch.RootOpt{
-		Provider:    "anthropic",
+		Provider:    ap.client.clientId,
 		Model:       ap.client.model,
 		Prompt:      ap.client.systemPrompt,
 		Temperature: ap.client.temperature,
@@ -138,6 +173,8 @@ func (ap *AnthropicProvider) Settings() brunch.ProviderSettings {
 		MaxTokens:    ap.client.maxTokens,
 		Temperature:  ap.client.temperature,
 		SystemPrompt: ap.client.systemPrompt,
+		Name:         ap.client.clientId,
+		Host:         ap.hostProviderName,
 	}
 }
 
@@ -148,15 +185,21 @@ func (ap *AnthropicProvider) CloneWithSettings(settings brunch.ProviderSettings)
 		os.Exit(1)
 	}
 	client, err := New(
+		settings.Name,
 		apiKey,
 		settings.SystemPrompt,
 		settings.Temperature,
 		settings.MaxTokens,
 	)
-	client.apiEndpoint = settings.BaseUrl
+
+	if settings.BaseUrl != "" {
+		client.apiEndpoint = settings.BaseUrl
+	} else {
+		client.apiEndpoint = DefaultAPIEndpoint
+	}
 	if err != nil {
 		fmt.Printf("Failed to create Anthropic client: %v\n", err)
 		os.Exit(1)
 	}
-	return NewAnthropicProvider(client)
+	return NewAnthropicProvider(settings.Host, settings.Name, client)
 }

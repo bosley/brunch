@@ -10,11 +10,7 @@ package brunch
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
-
-	"github.com/google/uuid"
 )
 
 type OperationalCallback struct {
@@ -23,48 +19,13 @@ type OperationalCallback struct {
 	OnNewProvider func(name string, host string, baseUrl string, maxTokens int, temperature float64, systemPrompt string) error
 }
 
-type SessionOpts struct {
-	Bucket   string
-	Provider string
-}
-
 type coreSession struct {
-	id               string
-	selectedProvider string
-	directory        string
-
-	provider Provider
-}
-
-// Create a new session - bucket is a subdirectory of the chat data store
-// that is used to group sessions together as the caller sees fit, inside that bucket
-// a subdirectory is created with the session uuid and the session is returned.
-func (c *Core) NewSession(opts SessionOpts) (*coreSession, error) {
-	id := uuid.New().String()
-
-	directory := filepath.Join(c.installDirectory, opts.Bucket, chatStoreDirectory, id)
-	if err := os.MkdirAll(directory, 0755); err != nil {
-		return nil, err
-	}
-
-	// DONT REMOVE THIS COMMENT
-	// i am well aware that this scope block is not neccesary, but it adds visual clarity
-	// with regard to mutex deferment DO NOT REMOVE - DO NOT REMOVE THIS COMMENT
-	{
-		c.sesMu.Lock()
-		defer c.sesMu.Unlock()
-		c.sessions[id] = &coreSession{
-			id:               id,
-			selectedProvider: opts.Provider,
-			provider:         nil, // we will have sessions BEFORE providers, as sessions DEFINE providers before use
-			directory:        directory,
-		}
-	}
-	return c.sessions[id], nil
+	id           string
+	activeChatId string
 }
 
 // Send a statement to the session
-func (s *coreSession) execute(stmt Statement, callbacks OperationalCallback) error {
+func (s *coreSession) execute(stmt *Statement, callbacks OperationalCallback) error {
 
 	if !stmt.IsPrepared() {
 		if err := stmt.Prepare(); err != nil {
@@ -94,7 +55,7 @@ func (s *coreSession) execute(stmt Statement, callbacks OperationalCallback) err
 	return errors.New("not implemented")
 }
 
-func (s *coreSession) validateProperties(stmt Statement) error {
+func (s *coreSession) validateProperties(stmt *Statement) error {
 	for _, prop := range stmt.cmd.properties {
 		if !s.isPropertyValid(prop) {
 			return fmt.Errorf("invalid property: %s", prop.id)

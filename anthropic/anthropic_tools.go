@@ -26,7 +26,7 @@ type ToolCall struct {
 }
 
 func NewTools(apiKey, systemPrompt string, temperature float64, maxTokens int) (*ToolsClient, error) {
-	baseClient, err := New(apiKey, systemPrompt, temperature, maxTokens)
+	baseClient, err := New("anthropic-tools", apiKey, systemPrompt, temperature, maxTokens)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create base client: %w", err)
 	}

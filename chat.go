@@ -46,7 +46,7 @@ func NewChatInstance(provider Provider) *ChatInstance {
 	return chat
 }
 
-func NewChatInstanceFromSnapshot(provider Provider, snap *Snapshot) (*ChatInstance, error) {
+func NewChatInstanceFromSnapshot(providers map[string]Provider, snap *Snapshot) (*ChatInstance, error) {
 	root, err := unmarshalNode(snap.Contents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
@@ -55,6 +55,11 @@ func NewChatInstanceFromSnapshot(provider Provider, snap *Snapshot) (*ChatInstan
 	rootNode, ok := root.(*RootNode)
 	if !ok {
 		return nil, fmt.Errorf("snapshot does not contain a valid root node")
+	}
+
+	provider, exists := providers[snap.ProviderName]
+	if !exists {
+		return nil, fmt.Errorf("provider %s not found", snap.ProviderName)
 	}
 
 	chat := &ChatInstance{
@@ -138,6 +143,7 @@ func (c *ChatInstance) Snapshot() (*Snapshot, error) {
 		return nil, e
 	}
 	s := &Snapshot{
+		ProviderName: c.provider.Settings().Host,
 		ActiveBranch: c.currentNode.Hash(),
 		Contents:     b,
 	}

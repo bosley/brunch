@@ -6,140 +6,163 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/bosley/brunch"
+	"github.com/bosley/brunch/anthropic"
 )
 
 var loadDir *string
-var config *Config
 var chatEnabled bool
+var core *brunch.Core
+var logger *slog.Logger
 
-const (
-	DefaultCommandKey uint8 = '\\'
-)
+const sessionId = "cli-session"
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+
+	logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
 
-	loadDir = flag.String("load", ".", "Load directory containing insu.yaml")
+	loadDir = flag.String("load", "/tmp/brunch", "Load directory containing insu.yaml")
 	flag.Parse()
 
-	var err error
-	config, err = LoadFromDir(*loadDir)
-	if err != nil {
-		if err := InitDirectory(*loadDir); err != nil {
-			fmt.Println("Failed to initialize directory:", err)
-			os.Exit(1)
-		}
-		config, err = LoadFromDir(*loadDir)
-		if err != nil {
-			fmt.Println("Failed to load config:", err)
-			os.Exit(1)
-		}
-	}
+	core = brunch.NewCore(brunch.CoreOpts{
+		InstallDirectory: *loadDir,
 
-	client := clientFromSelectedProvider(config)
-	var chat *brunch.ChatInstance
+		// These are not saved to disk - only derivatives are saved
+		BaseProviders: map[string]brunch.Provider{
+			"anthropic": anthropic.InitialAnthropicProvider(),
+		},
+	})
 
-	if config.Snapshot != nil {
-		snap, err := brunch.SnapshotFromJSON(config.Snapshot)
-		if err != nil {
-			fmt.Println("failed to load snapshot", err)
+	if !core.IsInstalled() {
+		slog.Info("installing core", "dir", *loadDir)
+		if err := core.Install(); err != nil {
+			fmt.Println("Failed to install core:", err)
 			os.Exit(1)
 		}
-		chat, err = brunch.NewChatInstanceFromSnapshot(client, snap)
-		if err != nil {
-			fmt.Println("failed to restore snapshot:", err)
-			os.Exit(1)
-		}
-		fmt.Println("loaded snapshot")
 	} else {
-		chat = brunch.NewChatInstance(client)
-		fmt.Println("new chat")
+		slog.Info("core already installed, loading providers", "dir", *loadDir)
+		if err := core.LoadProviders(); err != nil {
+			slog.Error("failed to load providers", "error", err)
+			os.Exit(1)
+		}
 	}
+	doRepl()
+}
 
-	welcome()
-	chatEnabled = true
-	chat.ToggleChat(chatEnabled)
+func doRepl() {
+	reader := bufio.NewReader(os.Stdin)
 
-	// Setup signal handling
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	done := make(chan bool)
-
-	// Start chat loop in goroutine
-	go func() {
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Println("Chat started. Press Ctrl+C to exit and view conversation tree.")
-		fmt.Println("Enter your messages (press Enter twice to send):")
-
-		for {
-			var lines []string
-			currentHash := chat.CurrentNode().Hash()[:8]
-			fmt.Printf("\n[%s]>  ", currentHash)
-
-			// Read until double Enter
-			for {
-				line, err := reader.ReadString('\n')
-				if err != nil {
-					fmt.Printf("Error reading input: %v\n", err)
-					done <- true
-					return
-				}
-
-				line = strings.TrimSpace(line)
-				if line == "" && len(lines) > 0 {
-					break
-				}
-				if line != "" {
-					if strings.HasPrefix(line, string(DefaultCommandKey)) {
-						if err := handleCommand(chat, line); err != nil {
-							fmt.Println("Command failed:", err)
-						}
-						currentHash = chat.CurrentNode().Hash()[:8]
-						fmt.Printf("\n[%s]>  ", currentHash)
-					} else {
-						lines = append(lines, line)
-					}
-				}
-			}
-
-			if !chatEnabled {
-				fmt.Println("chat is disabled, skipping")
-				continue
-			}
-
-			question := strings.Join(lines, "\n")
-			response, err := chat.SubmitMessage(question)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				continue
-			}
-
-			fmt.Println("assistant> ", response)
+	for {
+		fmt.Print(">")
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Printf("Error reading input: %v\n", err)
+			continue
 		}
-	}()
 
-	select {
-	case <-sigChan:
-		if err := saveSnapshot(chat); err != nil {
-			fmt.Println("failed to save snapshot on interrupt:", err)
+		// Quick check for immediate exit
+		statement := strings.TrimSpace(line)
+		if isNonReplQuit(statement) {
+			os.Exit(0)
 		}
-	case <-done:
-		if err := saveSnapshot(chat); err != nil {
-			fmt.Println("failed to save snapshot on completion:", err)
+
+		// Check for "brunch statement"
+		if !strings.HasPrefix(statement, "\\") {
+			fmt.Println("invalid branch statement")
+			continue
+		}
+
+		stmt := brunch.NewStatement(statement)
+		if err := stmt.Prepare(); err != nil {
+			fmt.Printf("Error preparing statement: %v\n", err)
+			continue
+		}
+
+		req := core.ExecuteStatement(sessionId, stmt)
+		if req.Error != nil {
+			fmt.Printf("Error: %v\n", req.Error)
+			continue
+		}
+
+		// If the statement yields anything other than an error, it's a chat request
+		// as all other commands are handled by the core
+		if req.ChatRequest != nil {
+			doChat(req.ChatRequest.LoadedInstance)
 		}
 	}
 }
 
-func handleCommand(panel brunch.Panel, line string) error {
+// Perform the actual chat with the person. This will eventually be diffused into a server
+// that could be repld if I decide to make this a web app.
+func doChat(chat *brunch.ChatInstance) {
+
+	banner()
+
+	chatEnabled = false
+	chat.ToggleChat(chatEnabled)
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("Chat started. Press Ctrl+C to exit and view conversation tree.")
+	fmt.Println("Enter your messages (press Enter twice to send):")
+
+	for {
+		var lines []string
+		currentHash := chat.CurrentNode().Hash()[:8]
+		fmt.Printf("\n[%s]>  ", currentHash)
+
+		// Read until double Enter
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				slog.Error("error reading input", "error", err)
+				return
+			}
+
+			line = strings.TrimSpace(line)
+			if line == "" && len(lines) > 0 {
+				break
+			}
+			if line != "" {
+				if strings.HasPrefix(line, "\\") {
+					doQuit, err := handleCommand(chat, line)
+					if err != nil {
+						slog.Error("command failed", "error", err)
+					}
+					// Soft quit to exit the chat and go back to primary repl
+					if doQuit {
+						return
+					}
+					currentHash = chat.CurrentNode().Hash()[:8]
+					fmt.Printf("\n[%s]>  ", currentHash)
+				} else {
+					lines = append(lines, line)
+				}
+			}
+		}
+
+		if !chatEnabled {
+			fmt.Println("chat is disabled, skipping. use \\x to toggle")
+			continue
+		}
+
+		question := strings.Join(lines, "\n")
+		response, err := chat.SubmitMessage(question)
+		if err != nil {
+			slog.Error("failed to submit message", "error", err)
+			continue
+		}
+
+		fmt.Println("assistant> ", response)
+	}
+}
+
+func handleCommand(panel brunch.Panel, line string) (bool, error) {
 	parts := strings.Split(line, " ")
 	switch parts[0] {
 	case "\\?":
@@ -166,42 +189,42 @@ func handleCommand(panel brunch.Panel, line string) error {
 		fmt.Scanln(&imagePath)
 		if err := panel.QueueImages([]string{imagePath}); err != nil {
 			fmt.Println("Failed to queue image:", err)
-			return err
+			return true, err
 		}
 	case "\\s":
-		saveSnapshot(panel)
+		saveSnapshot()
 	case "\\p":
 		if err := panel.Parent(); err != nil {
 			fmt.Println("failed to go to parent", err)
-			return err
+			return true, err
 		}
 	case "\\c":
 		if len(parts) < 2 {
 			fmt.Println("usage: \\c <index>")
-			return nil
+			return false, nil
 		}
 		idx, err := strconv.Atoi(parts[1])
 		if err != nil {
 			fmt.Println("failed to parse index", err)
-			return err
+			return true, err
 		}
 		if err := panel.Child(idx); err != nil {
 			fmt.Println("failed to go to child", err)
-			return err
+			return true, err
 		}
 	case "\\r":
 		if err := panel.Root(); err != nil {
 			fmt.Println("failed to go to root", err)
-			return err
+			return true, err
 		}
 	case "\\g":
 		if len(parts) < 2 {
 			fmt.Println("usage: \\g <node_hash>")
-			return nil
+			return false, nil
 		}
 		if err := panel.Goto(parts[1]); err != nil {
 			fmt.Println("failed to go to node", err)
-			return err
+			return true, err
 		}
 	case "\\.":
 		if panel.HasParent() {
@@ -210,7 +233,7 @@ func handleCommand(panel brunch.Panel, line string) error {
 		children := panel.ListChildren()
 		if len(children) == 0 {
 			fmt.Println("current node has no children")
-			return nil
+			return false, nil
 		}
 		fmt.Println("current node has children\n\tidx:\thash")
 		for idx, child := range children {
@@ -225,7 +248,7 @@ func handleCommand(panel brunch.Panel, line string) error {
 		artifacts := panel.Artifacts()
 		if len(artifacts) == 0 {
 			fmt.Println("No artifacts in current node")
-			return nil
+			return false, nil
 		}
 		fmt.Println("Artifacts in current node:")
 		for i, artifact := range artifacts {
@@ -258,40 +281,39 @@ func handleCommand(panel brunch.Panel, line string) error {
 		}
 	case "\\q":
 		fmt.Println("saving back to loaded snapshot")
-		if err := saveSnapshot(panel); err != nil {
-			fmt.Println("failed to save snapshot", err)
-			os.Exit(1)
+		if err := saveSnapshot(); err != nil {
+			slog.Error("failed to save snapshot on quit", "error", err)
 		}
-		fmt.Println("quit")
-		os.Exit(0)
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
-func saveSnapshot(panel brunch.Panel) error {
-	snapshot, e := panel.Snapshot()
-	if e != nil {
-		fmt.Println("failed to take snapshot", e)
-		return e
-	}
-	config.Snapshot, e = snapshot.Marshal()
-	if e != nil {
-		fmt.Println("failed to marshal snapshot", e)
-		return e
-	}
-	if e := config.Save(*loadDir); e != nil {
-		fmt.Println("failed to save config", e)
-		return e
-	}
-	return nil
+// I made it this way to indicate that we saving due to the app
+// call, and to because I had other save logic that I removed
+// and uncle bob says short functions are lit
+func saveSnapshot() error {
+	return core.SaveActiveChat(sessionId)
 }
 
-func welcome() {
+func banner() {
 	fmt.Println(`
 
-	        W E L C O M E
+		        W E L C O M E
 
-	To see a list of commands type '\?'
+		To see a list of commands type '\?'
 
-	`)
+		`)
+}
+
+func isNonReplQuit(line string) bool {
+	switch line {
+	case "\\q":
+		return true
+	case "quit":
+		return true
+	case "exit":
+		return true
+	}
+	return false
 }
