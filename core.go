@@ -228,7 +228,6 @@ func (c *Core) newProviderFromStatement(name string, host string, baseUrl string
 		}
 		c.provMu.Unlock()
 	}
-
 	if maxTokens == 0 || maxTokens > baseProvider.Settings().MaxTokens {
 		fmt.Println("maxTokens is 0, setting to default")
 		maxTokens = baseProvider.Settings().MaxTokens
@@ -241,6 +240,7 @@ func (c *Core) newProviderFromStatement(name string, host string, baseUrl string
 
 	// We "duplicate" checks, but who the fuck cares. Do this and save it to disk.
 	return c.AddProvider(name, baseProvider.CloneWithSettings(ProviderSettings{
+		Name:         name,
 		Host:         host,
 		BaseUrl:      baseUrl,
 		MaxTokens:    maxTokens,
@@ -280,6 +280,7 @@ func (c *Core) AddProvider(name string, p Provider) error {
 	return c.addToProviderStore(fmt.Sprintf("%s.json", sanitizedName), string(settingsBytes))
 }
 
+// Load all available providers from the provider store directory
 func (c *Core) LoadProviders() error {
 	dataStoreDir := filepath.Join(c.installDirectory, providerStoreDirectory)
 	files, err := os.ReadDir(dataStoreDir)
@@ -329,9 +330,24 @@ func (c *Core) NewChat(name string, providerName string) error {
 		}
 
 		baseSettings := provider.Settings()
-		baseSettings.Name = name
+		// Keep the provider name as is instead of overwriting with chat name
+		chatSettings := baseSettings
+		chatSettings.Name = name
+		// Important: Keep the original provider name in Host field
+		chatSettings.Host = providerName
 
-		chat = NewChatInstance(provider.CloneWithSettings(baseSettings))
+		cloned := provider.CloneWithSettings(chatSettings)
+
+		//					TODO NEXT
+		//
+		//
+		//
+		// TODO: New chats are "working" but they are setting "anthropic" as the provider evern when
+		// the provider is a derived variant. Suspect clone issues
+		//
+		fmt.Println("cloned", cloned.Settings().Name, cloned.Settings().Host)
+
+		chat = NewChatInstance(cloned)
 	}
 
 	return c.writeSnapshot(name, chat)

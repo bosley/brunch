@@ -61,12 +61,22 @@ func main() {
 	})
 
 	if !core.IsInstalled() {
+
+		fmt.Printf("first time installation for core in directory [%s]...\n", *loadDir)
 		if err := core.Install(); err != nil {
 			fmt.Println("Failed to install core:", err)
 			os.Exit(1)
 		}
+	} else {
+
+		fmt.Printf("loading providers from install directory [%s]...\n", *loadDir)
+		if err := core.LoadProviders(); err != nil {
+			fmt.Println("Failed to load providers:", err)
+			os.Exit(1)
+		}
 	}
 
+	fmt.Println("brunch cli started")
 	for alive(ctx) {
 		doRepl(ctx)
 	}
@@ -309,6 +319,9 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 	return false, nil
 }
 
+// I made it this way to indicate that we saving due to the app
+// call, and to because I had other save logic that I removed
+// and uncle bob says short functions are lit
 func saveSnapshot() error {
 	return core.SaveActiveChat(sessionId)
 }
@@ -338,14 +351,12 @@ func isQuit(line string) bool {
 func alive(ctx context.Context) bool {
 	select {
 	case <-ctx.Done():
-		if err := saveSnapshot(); err != nil {
-			fmt.Println("failed to save snapshot on interrupt:", err)
-		}
+		// We let this fail silently if it does as its a catchall for "just in case we need to save" scenario, but there might not be a chat session
+		saveSnapshot()
 		return false
 	case <-done:
-		if err := saveSnapshot(); err != nil {
-			fmt.Println("failed to save snapshot on completion:", err)
-		}
+		// We let this fail silently if it does as its a catchall for "just in case we need to save" scenario, but there might not be a chat session
+		saveSnapshot()
 		return false
 	default:
 		return true

@@ -16,6 +16,9 @@ const (
 type AnthropicProvider struct {
 	client        *Client
 	pendingImages []string
+
+	providerName     string
+	hostProviderName string
 }
 
 var _ brunch.Provider = (*AnthropicProvider)(nil)
@@ -27,6 +30,7 @@ func InitialAnthropicProvider() brunch.Provider {
 		os.Exit(1)
 	}
 	client, err := New(
+		"anthropic",
 		apiKey,
 		"",
 		0.7,
@@ -36,23 +40,25 @@ func InitialAnthropicProvider() brunch.Provider {
 		fmt.Printf("Failed to create Anthropic client: %v\n", err)
 		os.Exit(1)
 	}
-	return NewAnthropicProvider(client)
+	return NewAnthropicProvider("anthropic", "anthropic", client)
 }
 
 func (ap *AnthropicProvider) MaxTokens() int {
 	return ap.client.maxTokens
 }
 
-func NewAnthropicProvider(client *Client) *AnthropicProvider {
+func NewAnthropicProvider(host, name string, client *Client) *AnthropicProvider {
 	return &AnthropicProvider{
-		client:        client,
-		pendingImages: []string{},
+		providerName:     name,
+		hostProviderName: host,
+		client:           client,
+		pendingImages:    []string{},
 	}
 }
 
 func (ap *AnthropicProvider) NewConversationRoot() brunch.RootNode {
 	return *brunch.NewRootNode(brunch.RootOpt{
-		Provider:    "anthropic",
+		Provider:    ap.client.clientId,
 		Model:       ap.client.model,
 		Prompt:      ap.client.systemPrompt,
 		Temperature: ap.client.temperature,
@@ -167,7 +173,8 @@ func (ap *AnthropicProvider) Settings() brunch.ProviderSettings {
 		MaxTokens:    ap.client.maxTokens,
 		Temperature:  ap.client.temperature,
 		SystemPrompt: ap.client.systemPrompt,
-		Name:         "anthropic",
+		Name:         ap.client.clientId,
+		Host:         "anthropic",
 	}
 }
 
@@ -178,6 +185,7 @@ func (ap *AnthropicProvider) CloneWithSettings(settings brunch.ProviderSettings)
 		os.Exit(1)
 	}
 	client, err := New(
+		settings.Name,
 		apiKey,
 		settings.SystemPrompt,
 		settings.Temperature,
@@ -188,5 +196,5 @@ func (ap *AnthropicProvider) CloneWithSettings(settings brunch.ProviderSettings)
 		fmt.Printf("Failed to create Anthropic client: %v\n", err)
 		os.Exit(1)
 	}
-	return NewAnthropicProvider(client)
+	return NewAnthropicProvider("anthropic", settings.Name, client)
 }

@@ -143,7 +143,7 @@ func (c *ChatInstance) Snapshot() (*Snapshot, error) {
 		return nil, e
 	}
 	s := &Snapshot{
-		ProviderName: c.provider.Settings().Name,
+		ProviderName: c.provider.Settings().Host,
 		ActiveBranch: c.currentNode.Hash(),
 		Contents:     b,
 	}

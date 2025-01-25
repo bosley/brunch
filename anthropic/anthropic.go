@@ -19,6 +19,7 @@ const (
 )
 
 type Client struct {
+	clientId      string
 	apiKey        string
 	systemPrompt  string
 	temperature   float64
@@ -80,12 +81,13 @@ type apiResponse struct {
 	Role string `json:"role"`
 }
 
-func New(apiKey, systemPrompt string, temperature float64, maxTokens int) (*Client, error) {
+func New(clientId, apiKey, systemPrompt string, temperature float64, maxTokens int) (*Client, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("API key is required")
 	}
 
 	return &Client{
+		clientId:     clientId,
 		apiKey:       apiKey,
 		systemPrompt: systemPrompt,
 		temperature:  temperature,

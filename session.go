@@ -129,7 +129,6 @@ func (s *coreSession) newProvider(name string, propertyMap map[string]*property,
 		return fmt.Errorf("name must be specified")
 	}
 
-	fmt.Println("WHAT????", name, host, baseUrl, maxTokens, temperature, systemPrompt)
 	// We have to call into the core to create the provider it is the one that hosts
 	// the controlled map of providers that can be selected from as we have a hard
 	// seperation between provider implementations and the core
