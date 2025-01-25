@@ -329,24 +329,10 @@ func (c *Core) NewChat(name string, providerName string) error {
 			return fmt.Errorf("provider [%s] not found", providerName)
 		}
 
-		baseSettings := provider.Settings()
-		// Keep the provider name as is instead of overwriting with chat name
-		chatSettings := baseSettings
+		chatSettings := provider.Settings()
 		chatSettings.Name = name
-		// Important: Keep the original provider name in Host field
 		chatSettings.Host = providerName
-
 		cloned := provider.CloneWithSettings(chatSettings)
-
-		//					TODO NEXT
-		//
-		//
-		//
-		// TODO: New chats are "working" but they are setting "anthropic" as the provider evern when
-		// the provider is a derived variant. Suspect clone issues
-		//
-		fmt.Println("cloned", cloned.Settings().Name, cloned.Settings().Host)
-
 		chat = NewChatInstance(cloned)
 	}
 

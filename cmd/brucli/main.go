@@ -2,15 +2,12 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/bosley/brunch"
 	"github.com/bosley/brunch/anthropic"
@@ -19,31 +16,13 @@ import (
 var loadDir *string
 var chatEnabled bool
 var core *brunch.Core
-
-var sigChan chan os.Signal
-var done chan bool
+var logger *slog.Logger
 
 const sessionId = "cli-session"
 
 func main() {
-	// Create context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	// Setup signal handling
-	sigChan = make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	done = make(chan bool)
-
-	// Handle signals in a separate goroutine
-	go func() {
-		<-sigChan
-		fmt.Println("\nReceived interrupt signal, shutting down...")
-		cancel()
-		done <- true
-	}()
-
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
@@ -61,33 +40,25 @@ func main() {
 	})
 
 	if !core.IsInstalled() {
-
-		fmt.Printf("first time installation for core in directory [%s]...\n", *loadDir)
+		slog.Info("installing core", "dir", *loadDir)
 		if err := core.Install(); err != nil {
 			fmt.Println("Failed to install core:", err)
 			os.Exit(1)
 		}
 	} else {
-
-		fmt.Printf("loading providers from install directory [%s]...\n", *loadDir)
+		slog.Info("core already installed, loading providers", "dir", *loadDir)
 		if err := core.LoadProviders(); err != nil {
-			fmt.Println("Failed to load providers:", err)
+			slog.Error("failed to load providers", "error", err)
 			os.Exit(1)
 		}
 	}
-
-	fmt.Println("brunch cli started")
-	for alive(ctx) {
-		doRepl(ctx)
-	}
-
-	fmt.Println("exiting")
+	doRepl()
 }
 
-func doRepl(ctx context.Context) {
+func doRepl() {
 	reader := bufio.NewReader(os.Stdin)
 
-	for alive(ctx) {
+	for {
 		fmt.Print(">")
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -97,7 +68,7 @@ func doRepl(ctx context.Context) {
 
 		// Quick check for immediate exit
 		statement := strings.TrimSpace(line)
-		if isQuit(statement) {
+		if isNonReplQuit(statement) {
 			os.Exit(0)
 		}
 
@@ -122,16 +93,17 @@ func doRepl(ctx context.Context) {
 		// If the statement yields anything other than an error, it's a chat request
 		// as all other commands are handled by the core
 		if req.ChatRequest != nil {
-			doChat(ctx, req.ChatRequest.LoadedInstance)
-			return
+			doChat(req.ChatRequest.LoadedInstance)
 		}
 	}
 }
 
 // Perform the actual chat with the person. This will eventually be diffused into a server
 // that could be repld if I decide to make this a web app.
-func doChat(ctx context.Context, chat *brunch.ChatInstance) {
-	welcome()
+func doChat(chat *brunch.ChatInstance) {
+
+	banner()
+
 	chatEnabled = false
 	chat.ToggleChat(chatEnabled)
 
@@ -139,7 +111,7 @@ func doChat(ctx context.Context, chat *brunch.ChatInstance) {
 	fmt.Println("Chat started. Press Ctrl+C to exit and view conversation tree.")
 	fmt.Println("Enter your messages (press Enter twice to send):")
 
-	for alive(ctx) {
+	for {
 		var lines []string
 		currentHash := chat.CurrentNode().Hash()[:8]
 		fmt.Printf("\n[%s]>  ", currentHash)
@@ -148,8 +120,7 @@ func doChat(ctx context.Context, chat *brunch.ChatInstance) {
 		for {
 			line, err := reader.ReadString('\n')
 			if err != nil {
-				fmt.Printf("Error reading input: %v\n", err)
-				done <- true
+				slog.Error("error reading input", "error", err)
 				return
 			}
 
@@ -161,9 +132,8 @@ func doChat(ctx context.Context, chat *brunch.ChatInstance) {
 				if strings.HasPrefix(line, "\\") {
 					doQuit, err := handleCommand(chat, line)
 					if err != nil {
-						fmt.Println("Command failed:", err)
+						slog.Error("command failed", "error", err)
 					}
-
 					// Soft quit to exit the chat and go back to primary repl
 					if doQuit {
 						return
@@ -177,14 +147,14 @@ func doChat(ctx context.Context, chat *brunch.ChatInstance) {
 		}
 
 		if !chatEnabled {
-			fmt.Println("chat is disabled, skipping")
+			fmt.Println("chat is disabled, skipping. use \\x to toggle")
 			continue
 		}
 
 		question := strings.Join(lines, "\n")
 		response, err := chat.SubmitMessage(question)
 		if err != nil {
-			fmt.Printf("Error: %v\n", err)
+			slog.Error("failed to submit message", "error", err)
 			continue
 		}
 
@@ -312,7 +282,7 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 	case "\\q":
 		fmt.Println("saving back to loaded snapshot")
 		if err := saveSnapshot(); err != nil {
-			fmt.Println("failed to save snapshot", err)
+			slog.Error("failed to save snapshot on quit", "error", err)
 		}
 		return true, nil
 	}
@@ -326,17 +296,17 @@ func saveSnapshot() error {
 	return core.SaveActiveChat(sessionId)
 }
 
-func welcome() {
+func banner() {
 	fmt.Println(`
 
-	        W E L C O M E
+		        W E L C O M E
 
-	To see a list of commands type '\?'
+		To see a list of commands type '\?'
 
-	`)
+		`)
 }
 
-func isQuit(line string) bool {
+func isNonReplQuit(line string) bool {
 	switch line {
 	case "\\q":
 		return true
@@ -346,19 +316,4 @@ func isQuit(line string) bool {
 		return true
 	}
 	return false
-}
-
-func alive(ctx context.Context) bool {
-	select {
-	case <-ctx.Done():
-		// We let this fail silently if it does as its a catchall for "just in case we need to save" scenario, but there might not be a chat session
-		saveSnapshot()
-		return false
-	case <-done:
-		// We let this fail silently if it does as its a catchall for "just in case we need to save" scenario, but there might not be a chat session
-		saveSnapshot()
-		return false
-	default:
-		return true
-	}
 }

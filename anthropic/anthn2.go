@@ -174,7 +174,7 @@ func (ap *AnthropicProvider) Settings() brunch.ProviderSettings {
 		Temperature:  ap.client.temperature,
 		SystemPrompt: ap.client.systemPrompt,
 		Name:         ap.client.clientId,
-		Host:         "anthropic",
+		Host:         ap.hostProviderName,
 	}
 }
 
@@ -191,10 +191,15 @@ func (ap *AnthropicProvider) CloneWithSettings(settings brunch.ProviderSettings)
 		settings.Temperature,
 		settings.MaxTokens,
 	)
-	client.apiEndpoint = settings.BaseUrl
+
+	if settings.BaseUrl != "" {
+		client.apiEndpoint = settings.BaseUrl
+	} else {
+		client.apiEndpoint = DefaultAPIEndpoint
+	}
 	if err != nil {
 		fmt.Printf("Failed to create Anthropic client: %v\n", err)
 		os.Exit(1)
 	}
-	return NewAnthropicProvider("anthropic", settings.Name, client)
+	return NewAnthropicProvider(settings.Host, settings.Name, client)
 }
