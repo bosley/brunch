@@ -22,7 +22,6 @@ var logger *slog.Logger
 const sessionId = "cli-session"
 
 func main() {
-
 	logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
