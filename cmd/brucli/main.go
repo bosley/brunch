@@ -269,8 +269,12 @@ func banner() {
 
 		        W E L C O M E
 
-		To see a list of commands type '\?'
+		Send a message to the assistant by
+		typing the message and pressing "enter"
+		twice.
 
+		To see a list of commands type '\?'
+		To quit, type '\q'
 		`)
 }
 
@@ -311,7 +315,9 @@ func handleArtifacting(panel brunch.Panel, parts []string) (bool, error) {
 		}
 	}
 
-	fmt.Println("Artifacts in current node:")
+	if !writeToDisk {
+		fmt.Println("Artifacts in current node:")
+	}
 	for i, artifact := range artifacts {
 		switch artifact.Type() {
 		case brunch.ArtifactTypeFile:
