@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -21,7 +22,6 @@ var logger *slog.Logger
 const sessionId = "cli-session"
 
 func main() {
-
 	logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
@@ -177,7 +177,7 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 		fmt.Println("\t\\g: Go to node [traverse to a specific node by hash]")
 		fmt.Println("\t\\.: List children [list all children of the current node]")
 		fmt.Println("\t\\x: Toggle chat [toggle chat mode on/off - chat on by default press enter twice to send with no command leading]")
-		fmt.Println("\t\\a: List artifacts [display artifacts from current node]")
+		fmt.Println("\t\\a: List artifacts [display artifacts from current node] or [write artifacts to disk if followed by a directory path]")
 		fmt.Println("\t\\q: Quit [save and quit]")
 	case "\\l":
 		fmt.Println(panel.PrintHistory())
@@ -245,40 +245,7 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 		panel.ToggleChat(chatEnabled)
 		fmt.Printf("chat enabled: %t\n", chatEnabled)
 	case "\\a":
-		artifacts := panel.Artifacts()
-		if len(artifacts) == 0 {
-			fmt.Println("No artifacts in current node")
-			return false, nil
-		}
-		fmt.Println("Artifacts in current node:")
-		for i, artifact := range artifacts {
-			switch artifact.Type() {
-			case brunch.ArtifactTypeFile:
-				if fa, ok := artifact.(*brunch.FileArtifact); ok {
-					fileType := "unknown"
-					if fa.FileType != nil {
-						fileType = *fa.FileType
-					}
-					name := "(no name given)"
-					if fa.Name != "" {
-						name = fa.Name
-					}
-					preview := fa.Data
-					if len(preview) > 50 {
-						preview = preview[:50] + "..."
-					}
-					fmt.Printf("\t%d: File [%s] Name: %s\n\t   Preview: %s\n", i, fileType, name, preview)
-				}
-			case brunch.ArtifactTypeNonFile:
-				if nfa, ok := artifact.(*brunch.NonFileArtifact); ok {
-					preview := nfa.Data
-					if len(preview) > 50 {
-						preview = preview[:50] + "..."
-					}
-					fmt.Printf("\t%d: Text: %s\n", i, preview)
-				}
-			}
-		}
+		return handleArtifacting(panel, parts)
 	case "\\q":
 		fmt.Println("saving back to loaded snapshot")
 		if err := saveSnapshot(); err != nil {
@@ -301,8 +268,12 @@ func banner() {
 
 		        W E L C O M E
 
-		To see a list of commands type '\?'
+		Send a message to the assistant by
+		typing the message and pressing "enter"
+		twice.
 
+		To see a list of commands type '\?'
+		To quit, type '\q'
 		`)
 }
 
@@ -316,4 +287,85 @@ func isNonReplQuit(line string) bool {
 		return true
 	}
 	return false
+}
+
+func handleArtifacting(panel brunch.Panel, parts []string) (bool, error) {
+
+	artifacts := panel.Artifacts()
+	if len(artifacts) == 0 {
+		fmt.Println("No artifacts in current node")
+		return false, nil
+	}
+
+	writeToDisk := (len(parts) == 2)
+
+	if writeToDisk {
+		// Ensure the target is a directory
+		if fi, err := os.Stat(parts[1]); err != nil {
+			if os.IsNotExist(err) {
+				if err := os.MkdirAll(parts[1], 0755); err != nil {
+					return false, nil
+				}
+			}
+			if fi != nil && !fi.IsDir() {
+				fmt.Println("Target is not a directory")
+				return false, nil
+			}
+		}
+	}
+
+	if !writeToDisk {
+		fmt.Println("Artifacts in current node:")
+	}
+	for i, artifact := range artifacts {
+		switch artifact.Type() {
+		case brunch.ArtifactTypeFile:
+			if fa, ok := artifact.(*brunch.FileArtifact); ok {
+				if writeToDisk {
+					name := fmt.Sprintf("file_%s.artifact", fa.Id)
+					if fa.Name != "" {
+						name = fa.Name
+					}
+					if err := fa.Write(parts[1], name); err != nil {
+						fmt.Println("failed to write artifact", fa.Id, "to disk at location", parts[1])
+					}
+				} else {
+					// Just show the previews
+					fileType := "unknown"
+					if fa.FileType != nil {
+						fileType = *fa.FileType
+					}
+					name := "<unnamed artifact>"
+					if fa.Name != "" {
+						name = fa.Name
+					}
+					preview := fa.Data
+					if len(preview) > 50 {
+						preview = preview[:50] + "..."
+					}
+					fmt.Printf("\t%d: File [%s] Name: %s\n\t   Preview: %s\n", i, fileType, name, preview)
+				}
+			}
+		case brunch.ArtifactTypeNonFile:
+			if nfa, ok := artifact.(*brunch.NonFileArtifact); ok {
+				if writeToDisk {
+					// get sha256 hash of the data
+					hash := crypto.SHA256.New()
+					hash.Write([]byte(artifact.(*brunch.NonFileArtifact).Data))
+					sum := fmt.Sprintf("%x", hash.Sum(nil))
+					name := fmt.Sprintf("%s.artifact", sum[:8]) // Use first 8 chars of hex-encoded hash
+					if err := nfa.Write(parts[1], name); err != nil {
+						fmt.Println("failed to write non-file artifact", name, "to disk at location", parts[1])
+					}
+				} else {
+					preview := nfa.Data
+					if len(preview) > 50 {
+						preview = preview[:50] + "..."
+					}
+					fmt.Printf("\t%d: Text: %s\n", i, preview)
+				}
+			}
+		}
+	}
+	return false, nil
 }

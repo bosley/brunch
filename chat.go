@@ -246,6 +246,7 @@ func (c *ChatInstance) Artifacts() []Artifact {
 		if mpn, ok := c.currentNode.(*MessagePairNode); ok {
 			artifacts, err := ParseArtifactsFrom(mpn.Assistant)
 			if err != nil {
+				fmt.Println("error parsing artifacts:", err)
 				return []Artifact{}
 			}
 			return artifacts

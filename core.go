@@ -120,14 +120,6 @@ func (c *Core) IsInstalled() bool {
 	return err == nil
 }
 
-func (c *Core) loadFromStore(store string, filename string) (string, error) {
-	content, err := os.ReadFile(filepath.Join(c.installDirectory, store, filename))
-	if err != nil {
-		return "", err
-	}
-	return string(content), nil
-}
-
 // Retrive a list of all sessions
 // This locks the session map and returns a list of all session ids, so
 // best not call this in a hot spot
@@ -422,6 +414,10 @@ func (c *Core) loadChat(name string, hash *string) (*ChatInstance, error) {
 	return chat, nil
 }
 
+func (c *Core) addData(filename string, content string) error {
+	return os.WriteFile(filename, []byte(content), 0644)
+}
+
 func (c *Core) AddToDataStore(filename string, content string) error {
 	return c.addData(filepath.Join(c.installDirectory, dataStoreDirectory, filename), content)
 }
@@ -430,12 +426,16 @@ func (c *Core) AddToChatStore(filename string, content string) error {
 	return c.addData(filepath.Join(c.installDirectory, chatStoreDirectory, filename), content)
 }
 
-func (c *Core) addData(filename string, content string) error {
-	return os.WriteFile(filename, []byte(content), 0644)
+func (c *Core) addToProviderStore(filename string, content string) error {
+	return c.addData(filepath.Join(c.installDirectory, providerStoreDirectory, filename), content)
 }
 
-func (c *Core) addToProviderStore(filename string, content string) error {
-	return os.WriteFile(filepath.Join(c.installDirectory, providerStoreDirectory, filename), []byte(content), 0644)
+func (c *Core) loadFromStore(store string, filename string) (string, error) {
+	content, err := os.ReadFile(filepath.Join(c.installDirectory, store, filename))
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
 }
 
 func (c *Core) LoadFromDataStore(filename string) (string, error) {
