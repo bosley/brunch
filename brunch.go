@@ -122,13 +122,14 @@ func (m *MessagePairNode) Hash() string {
 	if m.Assistant == nil || m.User == nil {
 		return ""
 	}
-	hasher.Write([]byte(m.Assistant.B64EncodedContent + m.User.B64EncodedContent + m.Time.Format(time.RFC3339)))
+	hasher.Write([]byte(m.Assistant.UnencodedContent() + m.User.UnencodedContent() + m.Time.Format(time.RFC3339)))
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 type MessageData struct {
 	Role              string   `json:"role"`
-	B64EncodedContent string   `json:"b64_encoded_content"`
+	B64EncodedContent string   `json:"-"`
+	RawContent        string   `json:"content"`
 	Images            []string `json:"images,omitempty"`
 }
 
@@ -148,19 +149,52 @@ func NewMessageData(role string, unencodedContent string) *MessageData {
 	return &MessageData{
 		Role:              role,
 		B64EncodedContent: base64.StdEncoding.EncodeToString([]byte(unencodedContent)),
+		RawContent:        unencodedContent,
 	}
 }
 
 func (m *MessageData) UnencodedContent() string {
+	if m.RawContent != "" {
+		return m.RawContent
+	}
 	decoded, err := base64.StdEncoding.DecodeString(m.B64EncodedContent)
 	if err != nil {
-		return ""
+		return m.B64EncodedContent
 	}
-	return string(decoded)
+	m.RawContent = string(decoded)
+	return m.RawContent
 }
 
 func (m *MessageData) updateContent(content string) {
 	m.B64EncodedContent = base64.StdEncoding.EncodeToString([]byte(content))
+	m.RawContent = content
+}
+
+func (m *MessageData) MarshalJSON() ([]byte, error) {
+	type Alias MessageData
+	return json.Marshal(&struct {
+		Content string `json:"content"`
+		*Alias
+	}{
+		Content: m.UnencodedContent(),
+		Alias:   (*Alias)(m),
+	})
+}
+
+func (m *MessageData) UnmarshalJSON(data []byte) error {
+	type Alias MessageData
+	aux := &struct {
+		Content string `json:"content"`
+		*Alias
+	}{
+		Alias: (*Alias)(m),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	m.RawContent = aux.Content
+	m.B64EncodedContent = base64.StdEncoding.EncodeToString([]byte(aux.Content))
+	return nil
 }
 
 func (m *node) History() []string {

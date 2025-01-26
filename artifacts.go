@@ -3,11 +3,14 @@ package brunch
 import (
 	"encoding/base64"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
 type Artifact interface {
 	Type() ArtifactType
+	Write(dir string, name string) error
 }
 
 type ArtifactType int
@@ -46,7 +49,7 @@ func ParseArtifactsFrom(msg *MessageData) ([]Artifact, error) {
 	}
 	p := &parser{
 		role:    msg.Role,
-		content: string(decodedContent),
+		content: fmt.Sprintf("%s", decodedContent),
 		idx:     0,
 	}
 	return p.parse()
@@ -91,7 +94,6 @@ func (p *parser) parseUntilBlockIndicator() bool {
 func (p *parser) parse() ([]Artifact, error) {
 	result := []Artifact{}
 	textStart := p.idx
-
 	for p.idx < len(p.content) {
 		if p.content[p.idx] == '`' && p.isNext(1, '`') && p.isNext(2, '`') {
 			// If we have text before this code block, add it as a non-file artifact
@@ -103,7 +105,6 @@ func (p *parser) parse() ([]Artifact, error) {
 					})
 				}
 			}
-
 			p.idx += 3
 			a, err := p.parseMarkdownBlock()
 			if err != nil {
@@ -136,15 +137,12 @@ func (p *parser) parseMarkdownBlock() (Artifact, error) {
 	}
 	file_info := strings.TrimSpace(p.content[start : p.idx-1])
 	if len(file_info) == 0 {
-		fmt.Println("no file info for block - may be a non-file artifact")
 		return p.parseMarkdownNonFileBlock()
 	}
 	name := ""
 	fileType := ""
-	fmt.Println("file info for block:", file_info)
 	parts := strings.Split(file_info, ":")
 	if len(parts) != 2 {
-		fmt.Println("no explicit name given - treating as file type")
 		fileType = file_info
 	} else {
 		fileType = parts[0]
@@ -178,4 +176,46 @@ func (p *parser) parseMarkdownNonFileBlock() (Artifact, error) {
 	return &NonFileArtifact{
 		Data: p.content[start:end],
 	}, nil
+}
+
+func (a *FileArtifact) Write(dir string, name string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	fileName := a.Name
+	if fileName == "" {
+		if name == "" {
+			fileName = fmt.Sprintf("file_%s", a.Id)
+		} else {
+			fileName = name
+		}
+	}
+
+	if a.FileType != nil && *a.FileType != "" {
+		fileType := strings.TrimPrefix(*a.FileType, ".")
+		if !strings.HasSuffix(fileName, "."+fileType) {
+			fileName = fileName + "." + fileType
+		}
+	}
+
+	fullPath := filepath.Join(dir, fileName)
+	return os.WriteFile(fullPath, []byte(a.Data), 0644)
+}
+
+func (a *NonFileArtifact) Write(dir string, name string) error {
+	if name == "" {
+		return fmt.Errorf("name is required for writing artifacts")
+	}
+
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	if !strings.Contains(name, ".") {
+		name = name + ".txt"
+	}
+
+	fullPath := filepath.Join(dir, name)
+	return os.WriteFile(fullPath, []byte(a.Data), 0644)
 }
