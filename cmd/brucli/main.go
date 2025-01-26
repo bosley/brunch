@@ -104,7 +104,7 @@ func doChat(chat *brunch.ChatInstance) {
 
 	banner()
 
-	chatEnabled = false
+	chatEnabled = true
 	chat.ToggleChat(chatEnabled)
 
 	reader := bufio.NewReader(os.Stdin)
