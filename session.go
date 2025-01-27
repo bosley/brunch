@@ -63,9 +63,9 @@ func (s *coreSession) execute(stmt *Statement, callbacks OperationalCallback) er
 		return s.listChats(callbacks)
 	case "list-ctx":
 		return s.listContexts(callbacks)
-	case "describe-ctx":
+	case "desc-ctx":
 		return s.describeContext(stmt.cmd.nameGiven, callbacks)
-	case "describe-chat":
+	case "desc-chat":
 		return s.describeChat(stmt.cmd.nameGiven, callbacks)
 	}
 

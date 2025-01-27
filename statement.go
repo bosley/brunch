@@ -152,15 +152,15 @@ var commands = map[string]frame{
 		singleton:     true,
 	},
 
-	"\\describe-ctx": {
+	"\\desc-ctx": {
 		t:             TokenTypeDescribeContextCmd,
-		keyword:       "describe-ctx",
+		keyword:       "desc-ctx",
 		requiredProps: map[string]propertyType{},
 		optionalProps: map[string]propertyType{},
 	},
-	"\\describe-chat": {
+	"\\desc-chat": {
 		t:             TokenTypeDescribeChatCmd,
-		keyword:       "describe-chat",
+		keyword:       "desc-chat",
 		requiredProps: map[string]propertyType{},
 		optionalProps: map[string]propertyType{},
 	},
