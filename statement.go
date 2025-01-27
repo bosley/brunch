@@ -44,6 +44,7 @@ const (
 	TokenTypeNewProviderCmd tokenType = iota
 	TokenTypeNewChatCmd
 	TokenTypeChatCmd
+	TokenTypeNewContextCmd
 	TokenTypePropertyTag
 	TokenTypeString
 	TokenTypeInteger
@@ -70,6 +71,55 @@ type property struct {
 	typ  propertyType
 }
 
+type frame struct {
+	t             tokenType
+	keyword       string
+	requiredProps map[string]propertyType
+	optionalProps map[string]propertyType
+}
+
+var commands = map[string]frame{
+	"\\new-provider": {
+		t:       TokenTypeNewProviderCmd,
+		keyword: "new-provider",
+		requiredProps: map[string]propertyType{
+			"host": PropertyTypeString,
+		},
+		optionalProps: map[string]propertyType{
+			"base-url":      PropertyTypeString,
+			"system-prompt": PropertyTypeString,
+			"max-tokens":    PropertyTypeInteger,
+			"temperature":   PropertyTypeReal,
+		},
+	},
+	"\\new-chat": {
+		t:       TokenTypeNewChatCmd,
+		keyword: "new-chat",
+		requiredProps: map[string]propertyType{
+			"provider": PropertyTypeString,
+		},
+		optionalProps: map[string]propertyType{},
+	},
+	"\\chat": {
+		t:             TokenTypeChatCmd,
+		keyword:       "chat",
+		requiredProps: map[string]propertyType{},
+		optionalProps: map[string]propertyType{
+			"hash": PropertyTypeString,
+		},
+	},
+	"\\new-ctx": {
+		t:             TokenTypeNewContextCmd,
+		keyword:       "new-ctx",
+		requiredProps: map[string]propertyType{},
+		optionalProps: map[string]propertyType{
+			"dir":      PropertyTypeString,
+			"database": PropertyTypeString,
+			"web":      PropertyTypeString,
+		},
+	},
+}
+
 func NewStatement(content string) *Statement {
 	return &Statement{
 		content: content,
@@ -93,6 +143,7 @@ func (p *Statement) tokenize() error {
 			break
 		}
 
+		// Now parse properties based on command type
 		switch p.content[p.idx] {
 		case '\\':
 			if p.idx+2 > len(p.content) {
@@ -106,41 +157,27 @@ func (p *Statement) tokenize() error {
 				p.idx++
 			}
 
+			if p.idx == start {
+				return fmt.Errorf("invalid token at %d -> %s", p.idx, p.content[p.idx:])
+			}
+
 			cmdStr := p.content[start:p.idx]
-			switch cmdStr {
-			case "\\new-provider":
-				p.cmd = &cmd{
-					keyword:    "new-provider",
-					properties: make(map[string]*property),
-				}
-				p.tokens = append(p.tokens, token{
-					pos:       start,
-					tokenType: TokenTypeNewProviderCmd,
-					value:     cmdStr,
-				})
-			case "\\new-chat":
-				p.cmd = &cmd{
-					keyword:    "new-chat",
-					properties: make(map[string]*property),
-				}
-				p.tokens = append(p.tokens, token{
-					pos:       start,
-					tokenType: TokenTypeNewChatCmd,
-					value:     cmdStr,
-				})
-			case "\\chat":
-				p.cmd = &cmd{
-					keyword:    "chat",
-					properties: make(map[string]*property),
-				}
-				p.tokens = append(p.tokens, token{
-					pos:       start,
-					tokenType: TokenTypeChatCmd,
-					value:     cmdStr,
-				})
-			default:
+
+			cmdFrame, ok := commands[cmdStr]
+			if !ok {
 				return fmt.Errorf("unknown command: %s", cmdStr)
 			}
+
+			p.cmd = &cmd{
+				keyword:    cmdFrame.keyword,
+				properties: make(map[string]*property),
+			}
+
+			p.tokens = append(p.tokens, token{
+				pos:       start,
+				tokenType: cmdFrame.t,
+				value:     cmdStr,
+			})
 
 			// Skip whitespace after command
 			p.skipWhitespace()
@@ -161,33 +198,7 @@ func (p *Statement) tokenize() error {
 
 			p.cmd.nameGiven = nameToken.prop
 
-			// Now parse properties based on command type
-			var requiredProps map[string]propertyType
-			var optionalProps map[string]propertyType
-
-			switch cmdStr {
-			case "\\new-provider":
-				requiredProps = map[string]propertyType{
-					"host": PropertyTypeString,
-				}
-				optionalProps = map[string]propertyType{
-					"base-url":      PropertyTypeString,
-					"system-prompt": PropertyTypeString,
-					"max-tokens":    PropertyTypeInteger,
-					"temperature":   PropertyTypeReal,
-				}
-			case "\\new-chat":
-				requiredProps = map[string]propertyType{
-					"provider": PropertyTypeString,
-				}
-			case "\\chat":
-				requiredProps = map[string]propertyType{}
-				optionalProps = map[string]propertyType{
-					"hash": PropertyTypeString,
-				}
-			}
-
-			return p.parseProperties(requiredProps, optionalProps)
+			return p.parseProperties(cmdFrame.requiredProps, cmdFrame.optionalProps)
 		case ':':
 			return nil
 		default:

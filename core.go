@@ -16,6 +16,7 @@ import (
 
 const (
 	dataStoreDirectory     = "data-store"
+	contextStoreDirectory  = "context-store"
 	chatStoreDirectory     = "chat-store"
 	providerStoreDirectory = "provider-store"
 )
@@ -102,6 +103,7 @@ func (c *Core) Install() error {
 		filepath.Join(c.installDirectory, dataStoreDirectory),
 		filepath.Join(c.installDirectory, chatStoreDirectory),
 		filepath.Join(c.installDirectory, providerStoreDirectory),
+		filepath.Join(c.installDirectory, contextStoreDirectory),
 	}
 
 	for _, dir := range dirs {
@@ -175,6 +177,7 @@ func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) CoreStmtExecR
 	callbacks := OperationalCallback{
 		OnNewChat:     c.NewChat,
 		OnNewProvider: c.newProviderFromStatement,
+		OnNewContext:  c.newContext,
 		OnLoadChat: func(name string, hash *string) error {
 			ci, err := c.loadChat(name, hash)
 			if err != nil {
@@ -414,6 +417,27 @@ func (c *Core) loadChat(name string, hash *string) (*ChatInstance, error) {
 	return chat, nil
 }
 
+func (c *Core) newContext(name string, dir *string, database *string, web *string) error {
+	ctx := ContextSettings{
+		Name: name,
+	}
+	if dir != nil {
+		ctx.Type = ContextTypeDirectory
+		ctx.Value = *dir
+	} else if database != nil {
+		ctx.Type = ContextTypeDatabase
+		ctx.Value = *database
+	} else if web != nil {
+		ctx.Type = ContextTypeWeb
+		ctx.Value = *web
+	}
+	content, err := json.Marshal(ctx)
+	if err != nil {
+		return err
+	}
+	return c.AddToContextStore(fmt.Sprintf("%s.json", name), string(content))
+}
+
 func (c *Core) addData(filename string, content string) error {
 	return os.WriteFile(filename, []byte(content), 0644)
 }
@@ -444,4 +468,12 @@ func (c *Core) LoadFromDataStore(filename string) (string, error) {
 
 func (c *Core) LoadFromChatStore(filename string) (string, error) {
 	return c.loadFromStore(chatStoreDirectory, filename)
+}
+
+func (c *Core) LoadFromContextStore(filename string) (string, error) {
+	return c.loadFromStore(contextStoreDirectory, filename)
+}
+
+func (c *Core) AddToContextStore(filename string, content string) error {
+	return c.addData(filepath.Join(c.installDirectory, contextStoreDirectory, filename), content)
 }

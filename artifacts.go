@@ -49,7 +49,7 @@ func ParseArtifactsFrom(msg *MessageData) ([]Artifact, error) {
 	}
 	p := &parser{
 		role:    msg.Role,
-		content: fmt.Sprintf("%s", decodedContent),
+		content: string(decodedContent),
 		idx:     0,
 	}
 	return p.parse()

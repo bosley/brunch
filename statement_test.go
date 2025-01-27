@@ -17,7 +17,7 @@ func TestNewProviderCommand(t *testing.T) {
 		},
 		{
 			name:    "missing required property",
-			input:   `\new-provider "my-provider" :host "anthropic"`,
+			input:   `\new-provider "my-provider"`,
 			wantErr: true,
 		},
 		{
@@ -128,7 +128,7 @@ func TestParseProperty(t *testing.T) {
 			name:      "valid string property",
 			input:     `:host "anthropic"`,
 			propType:  PropertyTypeString,
-			wantValue: `"anthropic"`,
+			wantValue: "anthropic",
 			wantErr:   false,
 		},
 		{
@@ -178,6 +178,99 @@ func TestParseProperty(t *testing.T) {
 
 			if prop.prop != tt.wantValue {
 				t.Errorf("parseProperty() got value = %v, want %v", prop.prop, tt.wantValue)
+			}
+		})
+	}
+}
+
+func TestNewContextCommand(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		wantErr        bool
+		wantProperties map[string]string
+	}{
+		{
+			name:    "valid new context with directory",
+			input:   `\new-ctx "my-context" :dir "/path/to/dir"`,
+			wantErr: false,
+			wantProperties: map[string]string{
+				"dir": "/path/to/dir",
+			},
+		},
+		{
+			name:    "valid new context with database",
+			input:   `\new-ctx "my-context" :database "mysql://user:pass@localhost:3306/db"`,
+			wantErr: false,
+			wantProperties: map[string]string{
+				"database": "mysql://user:pass@localhost:3306/db",
+			},
+		},
+		{
+			name:    "valid new context with web",
+			input:   `\new-ctx "my-context" :web "https://example.com"`,
+			wantErr: false,
+			wantProperties: map[string]string{
+				"web": "https://example.com",
+			},
+		},
+		{
+			name:    "valid new context with multiple sources",
+			input:   `\new-ctx "my-context" :dir "./docs" :web "http://api.example.com" :database "sqlite://data.db"`,
+			wantErr: false,
+			wantProperties: map[string]string{
+				"dir":      "./docs",
+				"web":      "http://api.example.com",
+				"database": "sqlite://data.db",
+			},
+		},
+		{
+			name:    "missing command name",
+			input:   `\new-ctx :dir "/path"`,
+			wantErr: true,
+		},
+		{
+			name:    "invalid property name",
+			input:   `\new-ctx "my-context" :invalid "value"`,
+			wantErr: true,
+		},
+		{
+			name:    "missing property value",
+			input:   `\new-ctx "my-context" :dir`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stmt := NewStatement(tt.input)
+			err := stmt.Prepare()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewStatement().Prepare() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if err == nil {
+				if stmt.cmd.keyword != "new-ctx" {
+					t.Errorf("Expected command keyword 'new-ctx', got %s", stmt.cmd.keyword)
+				}
+
+				// Verify properties are correctly parsed
+				if tt.wantProperties != nil {
+					for propName, wantValue := range tt.wantProperties {
+						prop, exists := stmt.cmd.properties[propName]
+						if !exists {
+							t.Errorf("Expected property %q not found", propName)
+							continue
+						}
+						if prop.prop != wantValue {
+							t.Errorf("Property %q value = %q, want %q", propName, prop.prop, wantValue)
+						}
+						if prop.typ != PropertyTypeString {
+							t.Errorf("Property %q type = %v, want PropertyTypeString", propName, prop.typ)
+						}
+					}
+				}
 			}
 		})
 	}

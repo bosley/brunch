@@ -32,6 +32,20 @@ type Provider interface {
 	CloneWithSettings(ProviderSettings) Provider
 }
 
+type ContextType string
+
+const (
+	ContextTypeDirectory ContextType = "directory"
+	ContextTypeDatabase  ContextType = "database"
+	ContextTypeWeb       ContextType = "web"
+)
+
+type ContextSettings struct {
+	Name  string      `json:"name"`
+	Type  ContextType `json:"type"`
+	Value string      `json:"value"`
+}
+
 const (
 	NT_ROOT         NodeTyppe = "root"
 	NT_MESSAGE_PAIR NodeTyppe = "message_pair"
@@ -163,11 +177,6 @@ func (m *MessageData) UnencodedContent() string {
 	}
 	m.RawContent = string(decoded)
 	return m.RawContent
-}
-
-func (m *MessageData) updateContent(content string) {
-	m.B64EncodedContent = base64.StdEncoding.EncodeToString([]byte(content))
-	m.RawContent = content
 }
 
 func (m *MessageData) MarshalJSON() ([]byte, error) {

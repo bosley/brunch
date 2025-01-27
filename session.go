@@ -17,6 +17,7 @@ type OperationalCallback struct {
 	OnLoadChat    func(name string, hash *string) error
 	OnNewChat     func(name string, provider string) error
 	OnNewProvider func(name string, host string, baseUrl string, maxTokens int, temperature float64, systemPrompt string) error
+	OnNewContext  func(name string, dir *string, database *string, web *string) error
 }
 
 type coreSession struct {
@@ -50,6 +51,8 @@ func (s *coreSession) execute(stmt *Statement, callbacks OperationalCallback) er
 		return s.newChat(stmt.cmd.nameGiven, propertyMap, callbacks)
 	case "chat":
 		return s.chat(stmt.cmd.nameGiven, propertyMap, callbacks)
+	case "new-ctx":
+		return s.newContext(stmt.cmd.nameGiven, propertyMap, callbacks)
 	}
 
 	return errors.New("not implemented")
@@ -178,4 +181,30 @@ func (s *coreSession) chat(name string, propertyMap map[string]*property, callba
 	}
 
 	return callbacks.OnLoadChat(name, hash)
+}
+
+func (s *coreSession) newContext(name string, propertyMap map[string]*property, callbacks OperationalCallback) error {
+
+	var dir *string
+	var database *string
+	var web *string
+
+	for key, prop := range propertyMap {
+		switch key {
+		case "dir":
+			dir = &prop.prop
+		case "database":
+			database = &prop.prop
+		case "web":
+			web = &prop.prop
+		default:
+			return fmt.Errorf("invalid, unknown property: %s", key)
+		}
+	}
+
+	if name == "" {
+		return fmt.Errorf("name must be specified")
+	}
+
+	return callbacks.OnNewContext(name, dir, database, web)
 }
