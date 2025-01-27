@@ -49,6 +49,12 @@ const (
 	TokenTypeString
 	TokenTypeInteger
 	TokenTypeReal
+	TokenTypeDelChatCmd
+	TokenTypeDelContextCmd
+	TokenTypeListContextCmd
+	TokenTypeListChatCmd
+	TokenTypeDescribeContextCmd
+	TokenTypeDescribeChatCmd
 )
 
 type propertyType int
@@ -76,6 +82,7 @@ type frame struct {
 	keyword       string
 	requiredProps map[string]propertyType
 	optionalProps map[string]propertyType
+	singleton     bool
 }
 
 var commands = map[string]frame{
@@ -117,6 +124,45 @@ var commands = map[string]frame{
 			"database": PropertyTypeString,
 			"web":      PropertyTypeString,
 		},
+	},
+	"\\del-chat": {
+		t:             TokenTypeDelChatCmd,
+		keyword:       "del-chat",
+		requiredProps: map[string]propertyType{},
+		optionalProps: map[string]propertyType{},
+	},
+	"\\del-ctx": {
+		t:             TokenTypeDelContextCmd,
+		keyword:       "del-ctx",
+		requiredProps: map[string]propertyType{},
+		optionalProps: map[string]propertyType{},
+	},
+	"\\list-ctx": {
+		t:             TokenTypeListContextCmd,
+		keyword:       "list-ctx",
+		requiredProps: map[string]propertyType{},
+		optionalProps: map[string]propertyType{},
+		singleton:     true,
+	},
+	"\\list-chat": {
+		t:             TokenTypeListChatCmd,
+		keyword:       "list-chat",
+		requiredProps: map[string]propertyType{},
+		optionalProps: map[string]propertyType{},
+		singleton:     true,
+	},
+
+	"\\describe-ctx": {
+		t:             TokenTypeDescribeContextCmd,
+		keyword:       "describe-ctx",
+		requiredProps: map[string]propertyType{},
+		optionalProps: map[string]propertyType{},
+	},
+	"\\describe-chat": {
+		t:             TokenTypeDescribeChatCmd,
+		keyword:       "describe-chat",
+		requiredProps: map[string]propertyType{},
+		optionalProps: map[string]propertyType{},
 	},
 }
 
@@ -178,6 +224,11 @@ func (p *Statement) tokenize() error {
 				tokenType: cmdFrame.t,
 				value:     cmdStr,
 			})
+
+			// These dont take params
+			if cmdFrame.singleton {
+				return nil
+			}
 
 			// Skip whitespace after command
 			p.skipWhitespace()

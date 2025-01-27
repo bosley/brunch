@@ -63,6 +63,9 @@ type Conversation interface {
 
 	// Submit a message to the chat provider
 	SubmitMessage(message string) (string, error)
+
+	// List the knowledge contexts that are attached to the conversation
+	ListKnowledgeContexts() []string
 }
 
 // The snapshot is a hollistic snapshot of the current state of the chat
@@ -144,6 +147,9 @@ func newChatInstanceFromSnapshot(core *Core, snap *Snapshot) (*chatInstance, err
 		ctx, exists := core.contexts[ctxName]
 		if !exists {
 			return nil, fmt.Errorf("context %s not found in available contexts", ctxName)
+		}
+		if err := chat.provider.AttachKnowledgeContext(*ctx); err != nil {
+			return nil, fmt.Errorf("failed to attach context %s: %w", ctxName, err)
 		}
 		chat.contexts[ctxName] = ctx
 	}
@@ -367,4 +373,12 @@ func (c *chatInstance) AttachContext(ctxName string) error {
 
 	c.contexts[ctxName] = ctx
 	return nil
+}
+
+func (c *chatInstance) ListKnowledgeContexts() []string {
+	contexts := []string{}
+	for _, ctx := range c.contexts {
+		contexts = append(contexts, ctx.Name)
+	}
+	return contexts
 }

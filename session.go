@@ -10,10 +10,16 @@ import (
 // When they submit a commmand via the core, it will use these callbacks to receive instructions
 // based on the command when `execucte` is called (below)
 type OperationalCallback struct {
-	OnLoadChat    func(name string, hash *string) error
-	OnNewChat     func(name string, provider string) error
-	OnNewProvider func(name string, host string, baseUrl string, maxTokens int, temperature float64, systemPrompt string) error
-	OnNewContext  func(name string, dir *string, database *string, web *string) error
+	OnLoadChat        func(name string, hash *string) error
+	OnNewChat         func(name string, provider string) error
+	OnNewProvider     func(name string, host string, baseUrl string, maxTokens int, temperature float64, systemPrompt string) error
+	OnNewContext      func(name string, dir *string, database *string, web *string) error
+	OnDeleteChat      func(name string) error
+	OnDeleteContext   func(name string) error
+	OnListChats       func() error
+	OnListContexts    func() error
+	OnDescribeContext func(name string) error
+	OnDescribeChat    func(name string) error
 }
 
 type coreSession struct {
@@ -49,6 +55,18 @@ func (s *coreSession) execute(stmt *Statement, callbacks OperationalCallback) er
 		return s.chat(stmt.cmd.nameGiven, propertyMap, callbacks)
 	case "new-ctx":
 		return s.newContext(stmt.cmd.nameGiven, propertyMap, callbacks)
+	case "del-chat":
+		return s.deleteChat(stmt.cmd.nameGiven, callbacks)
+	case "del-ctx":
+		return s.deleteContext(stmt.cmd.nameGiven, callbacks)
+	case "list-chat":
+		return s.listChats(callbacks)
+	case "list-ctx":
+		return s.listContexts(callbacks)
+	case "describe-ctx":
+		return s.describeContext(stmt.cmd.nameGiven, callbacks)
+	case "describe-chat":
+		return s.describeChat(stmt.cmd.nameGiven, callbacks)
 	}
 
 	return errors.New("not implemented")
@@ -203,4 +221,40 @@ func (s *coreSession) newContext(name string, propertyMap map[string]*property, 
 	}
 
 	return callbacks.OnNewContext(name, dir, database, web)
+}
+
+func (s *coreSession) deleteChat(name string, callbacks OperationalCallback) error {
+	if name == "" {
+		return fmt.Errorf("name must be specified")
+	}
+	return callbacks.OnDeleteChat(name)
+}
+
+func (s *coreSession) deleteContext(name string, callbacks OperationalCallback) error {
+	if name == "" {
+		return fmt.Errorf("name must be specified")
+	}
+	return callbacks.OnDeleteContext(name)
+}
+
+func (s *coreSession) listChats(callbacks OperationalCallback) error {
+	return callbacks.OnListChats()
+}
+
+func (s *coreSession) listContexts(callbacks OperationalCallback) error {
+	return callbacks.OnListContexts()
+}
+
+func (s *coreSession) describeContext(name string, callbacks OperationalCallback) error {
+	if name == "" {
+		return fmt.Errorf("name must be specified")
+	}
+	return callbacks.OnDescribeContext(name)
+}
+
+func (s *coreSession) describeChat(name string, callbacks OperationalCallback) error {
+	if name == "" {
+		return fmt.Errorf("name must be specified")
+	}
+	return callbacks.OnDescribeChat(name)
 }

@@ -214,6 +214,50 @@ func TestSession_Execute(t *testing.T) {
 			content: `\new-ctx`,
 			wantErr: true,
 		},
+		{
+			name:    "delete chat command",
+			content: `\del-chat "test-chat"`,
+			validate: func(t *testing.T, called *bool, args []interface{}) {
+				if !*called {
+					t.Error("OnDeleteChat callback was not called")
+				}
+				if len(args) != 1 {
+					t.Errorf("expected 1 arg, got %d", len(args))
+				}
+				name := args[0].(string)
+				name = strings.Trim(name, `"`)
+				if name != "test-chat" {
+					t.Errorf("expected name 'test-chat', got %s", name)
+				}
+			},
+		},
+		{
+			name:    "delete chat missing name",
+			content: `\del-chat`,
+			wantErr: true,
+		},
+		{
+			name:    "delete context command",
+			content: `\del-ctx "test-context"`,
+			validate: func(t *testing.T, called *bool, args []interface{}) {
+				if !*called {
+					t.Error("OnDeleteContext callback was not called")
+				}
+				if len(args) != 1 {
+					t.Errorf("expected 1 arg, got %d", len(args))
+				}
+				name := args[0].(string)
+				name = strings.Trim(name, `"`)
+				if name != "test-context" {
+					t.Errorf("expected name 'test-context', got %s", name)
+				}
+			},
+		},
+		{
+			name:    "delete context missing name",
+			content: `\del-ctx`,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -232,11 +276,13 @@ func TestSession_Execute(t *testing.T) {
 
 			// Track callback calls
 			var (
-				newProviderCalled bool
-				newChatCalled     bool
-				loadChatCalled    bool
-				newContextCalled  bool
-				callbackArgs      []interface{}
+				newProviderCalled   bool
+				newChatCalled       bool
+				loadChatCalled      bool
+				newContextCalled    bool
+				deleteChatCalled    bool
+				deleteContextCalled bool
+				callbackArgs        []interface{}
 			)
 
 			callbacks := OperationalCallback{
@@ -258,6 +304,16 @@ func TestSession_Execute(t *testing.T) {
 				OnNewContext: func(name string, dir, database, web *string) error {
 					newContextCalled = true
 					callbackArgs = []interface{}{name, dir, database, web}
+					return nil
+				},
+				OnDeleteChat: func(name string) error {
+					deleteChatCalled = true
+					callbackArgs = []interface{}{name}
+					return nil
+				},
+				OnDeleteContext: func(name string) error {
+					deleteContextCalled = true
+					callbackArgs = []interface{}{name}
 					return nil
 				},
 			}
@@ -286,6 +342,10 @@ func TestSession_Execute(t *testing.T) {
 				called = &loadChatCalled
 			case "new-ctx":
 				called = &newContextCalled
+			case "del-chat":
+				called = &deleteChatCalled
+			case "del-ctx":
+				called = &deleteContextCalled
 			}
 
 			// Validate callback and args

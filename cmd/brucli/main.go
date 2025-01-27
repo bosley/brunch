@@ -303,6 +303,16 @@ func handleCommand(conversation brunch.Conversation, line string) (bool, error) 
 			return true, err
 		}
 		fmt.Println("attached context", ctxName, "to chat")
+	case "\\available-k":
+		fmt.Println("Available Knowledge Contexts:\n")
+		for _, ctx := range core.ListContexts() {
+			fmt.Println("\t", ctx)
+		}
+	case "\\active-k":
+		fmt.Println("Active Knowledge Contexts:\n")
+		for _, ctx := range conversation.ListKnowledgeContexts() {
+			fmt.Println("\t", ctx)
+		}
 	case "\\q":
 		fmt.Println("saving back to loaded snapshot")
 		if err := saveSnapshot(); err != nil {
