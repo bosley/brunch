@@ -465,7 +465,21 @@ func (c *Core) newContext(name string, dir *string, database *string, web *strin
 	if err != nil {
 		return err
 	}
-	return c.AddToContextStore(fmt.Sprintf("%s.json", name), string(content))
+
+	c.ctxMu.Lock()
+	if _, exists := c.contexts[name]; exists {
+		c.ctxMu.Unlock()
+		return fmt.Errorf("context %s already exists", name)
+	}
+
+	if err := c.AddToContextStore(fmt.Sprintf("%s.json", name), string(content)); err != nil {
+		c.ctxMu.Unlock()
+		return err
+	}
+
+	c.contexts[name] = &ctx
+	c.ctxMu.Unlock()
+	return nil
 }
 
 func (c *Core) newContextFromAttached(ctx *ContextSettings) error {
