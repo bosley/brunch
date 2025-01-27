@@ -186,6 +186,8 @@ func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) CoreStmtExecR
 		OnListContexts:    c.onListContexts,
 		OnDescribeContext: c.onDescribeContext,
 		OnDescribeChat:    c.onDescribeChat,
+		OnListProviders:   c.onListProviders,
+		OnDeleteProvider:  c.onDeleteProvider,
 		OnLoadChat: func(name string, hash *string) error {
 			ci, err := c.loadChat(name, hash)
 			if err != nil {
@@ -537,16 +539,6 @@ func (c *Core) AddToContextStore(filename string, content string) error {
 	return c.addData(filepath.Join(c.installDirectory, contextStoreDirectory, filename), content)
 }
 
-func (c *Core) ListContexts() []string {
-	c.ctxMu.Lock()
-	defer c.ctxMu.Unlock()
-	ctxs := make([]string, 0, len(c.contexts))
-	for name := range c.contexts {
-		ctxs = append(ctxs, name)
-	}
-	return ctxs
-}
-
 // isContextInUse checks if a context is being used by any chat by scanning all chat files
 func (c *Core) isContextInUse(contextName string) (bool, error) {
 	chatStoreDir := filepath.Join(c.installDirectory, chatStoreDirectory)
@@ -670,33 +662,115 @@ func (c *Core) getStorageJsons(store string) ([]string, error) {
 	return jsons, nil
 }
 
-func (c *Core) onListChats() error {
+func (c *Core) onDeleteProvider(name string) error {
+	// First check if the provider exists
+	c.provMu.Lock()
+	_, exists := c.providers[name]
+	if !exists {
+		c.provMu.Unlock()
+		return fmt.Errorf("provider %s does not exist", name)
+	}
+
+	// Check if it's a base provider
+	if _, isBase := c.baseProviders[name]; isBase {
+		c.provMu.Unlock()
+		return fmt.Errorf("cannot delete base provider %s", name)
+	}
+
+	// Check if any chats are using this provider
+	inUse := false
+	chatStoreDir := filepath.Join(c.installDirectory, chatStoreDirectory)
+	files, err := os.ReadDir(chatStoreDir)
+	if err != nil {
+		c.provMu.Unlock()
+		return fmt.Errorf("failed to read chat store directory: %w", err)
+	}
+
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+
+		content, err := c.LoadFromChatStore(file.Name())
+		if err != nil {
+			c.provMu.Unlock()
+			return fmt.Errorf("failed to load chat file %s: %w", file.Name(), err)
+		}
+
+		var snapshot Snapshot
+		if err := json.Unmarshal([]byte(content), &snapshot); err != nil {
+			c.provMu.Unlock()
+			return fmt.Errorf("failed to unmarshal chat snapshot from %s: %w", file.Name(), err)
+		}
+
+		if snapshot.ProviderName == name {
+			inUse = true
+			break
+		}
+	}
+
+	if inUse {
+		c.provMu.Unlock()
+		return fmt.Errorf("cannot delete provider %s: it is currently in use by one or more chats", name)
+	}
+
+	// Remove from memory
+	delete(c.providers, name)
+	c.provMu.Unlock()
+
+	// Delete the provider file
+	providerFile := fmt.Sprintf("%s.json", name)
+	if !strings.HasSuffix(name, ".json") {
+		providerFile = fmt.Sprintf("%s.json", name)
+	}
+
+	err = os.Remove(filepath.Join(c.installDirectory, providerStoreDirectory, providerFile))
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete provider file: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Core) ListContexts() []string {
+	c.ctxMu.Lock()
+	defer c.ctxMu.Unlock()
+	ctxs := make([]string, 0, len(c.contexts))
+	for name := range c.contexts {
+		ctxs = append(ctxs, name)
+	}
+	return ctxs
+}
+
+func (c *Core) onListChats() ([]string, error) {
 	jsons, err := c.getStorageJsons(chatStoreDirectory)
 	if err != nil {
-		return fmt.Errorf("failed to get chat store jsons: %w", err)
+		return nil, fmt.Errorf("failed to get chat store jsons: %w", err)
 	}
 
+	chats := []string{}
 	for _, json := range jsons {
 		name := strings.TrimSuffix(json, ".json")
-		fmt.Println(name)
+		chats = append(chats, name)
 	}
-	return nil
+	return chats, nil
 }
 
-func (c *Core) onListContexts() error {
+func (c *Core) onListContexts() ([]string, error) {
 	jsons, err := c.getStorageJsons(contextStoreDirectory)
 	if err != nil {
-		return fmt.Errorf("failed to get context store jsons: %w", err)
+		return nil, fmt.Errorf("failed to get context store jsons: %w", err)
 	}
 
+	ctxs := []string{}
 	for _, json := range jsons {
 		name := strings.TrimSuffix(json, ".json")
-		fmt.Println(name)
+		ctxs = append(ctxs, name)
 	}
-	return nil
+	return ctxs, nil
 }
 
-func (c *Core) onDescribeContext(name string) error {
+func (c *Core) onDescribeContext(name string) (string, error) {
 
 	if !strings.HasSuffix(name, ".json") {
 		name = fmt.Sprintf("%s.json", name)
@@ -704,31 +778,51 @@ func (c *Core) onDescribeContext(name string) error {
 
 	content, err := c.LoadFromContextStore(name)
 	if err != nil {
-		return fmt.Errorf("failed to load context from disk: %w", err)
+		return "", fmt.Errorf("failed to load context from disk: %w", err)
 	}
-	fmt.Println("\t", content)
-	return nil
+	return content, nil
 }
 
-func (c *Core) onDescribeChat(name string) error {
+func (c *Core) onDescribeChat(name string) (string, error) {
 	chat, err := c.loadChat(name, nil)
 	if err != nil {
-		return fmt.Errorf("failed to load chat from disk: %w", err)
+		return "", fmt.Errorf("failed to load chat from disk: %w", err)
 	}
 
-	fmt.Println("Chat: ", name)
-	fmt.Println("Provider: ")
-	fmt.Println("\t", chat.provider.Settings().Name)
-	fmt.Println("\t", chat.provider.Settings().BaseUrl)
-	fmt.Println("\t", chat.provider.Settings().MaxTokens)
-	fmt.Println("\t", chat.provider.Settings().Temperature)
-	fmt.Println("\t", chat.provider.Settings().SystemPrompt)
-
-	fmt.Println("Contexts: ")
+	desc := fmt.Sprintf("%-15s %s\n", "Name:", name)
+	desc += fmt.Sprintf("%-15s %s\n", "Provider:", chat.provider.Settings().Name)
+	desc += fmt.Sprintf("%-15s %s\n", "Base URL:", chat.provider.Settings().BaseUrl)
+	desc += fmt.Sprintf("%-15s %d\n", "Max Tokens:", chat.provider.Settings().MaxTokens)
+	desc += fmt.Sprintf("%-15s %.2f\n", "Temperature:", chat.provider.Settings().Temperature)
+	desc += fmt.Sprintf("%-15s %s\n", "System Prompt:", chat.provider.Settings().SystemPrompt)
+	desc += fmt.Sprintf("%-15s %d\n", "Contexts:", len(chat.contexts))
 	for _, ctx := range chat.contexts {
-		fmt.Println("\t", ctx.Name)
+		desc += fmt.Sprintf("%-15s %s\n", "", ctx.Name)
+	}
+	desc += fmt.Sprintf("%-15s %s\n", "Active Hash:", chat.currentNode.Hash())
+	return desc, nil
+}
+
+func (c *Core) onListProviders() ([]string, error) {
+	c.provMu.Lock()
+	defer c.provMu.Unlock()
+
+	jsons, err := c.getStorageJsons(providerStoreDirectory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get provider store jsons: %w", err)
 	}
 
-	fmt.Println("Active Hash: ", chat.currentNode.Hash())
-	return nil
+	providers := []string{}
+	providers = append(providers, fmt.Sprintf("Base Providers (immutable): %d", len(c.baseProviders)))
+	for _, prov := range c.baseProviders {
+		providers = append(providers, fmt.Sprintf("\t%s", prov.Settings().Name))
+	}
+
+	providers = append(providers, "\n\nDerived Providers:")
+	for _, json := range jsons {
+		name := strings.TrimSuffix(json, ".json")
+		providers = append(providers, fmt.Sprintf("\t%s", name))
+	}
+
+	return providers, nil
 }

@@ -55,6 +55,8 @@ const (
 	TokenTypeListChatCmd
 	TokenTypeDescribeContextCmd
 	TokenTypeDescribeChatCmd
+	TokenTypeListProviderCmd
+	TokenTypeDelProviderCmd
 )
 
 type propertyType int
@@ -151,7 +153,6 @@ var commands = map[string]frame{
 		optionalProps: map[string]propertyType{},
 		singleton:     true,
 	},
-
 	"\\desc-ctx": {
 		t:             TokenTypeDescribeContextCmd,
 		keyword:       "desc-ctx",
@@ -161,6 +162,19 @@ var commands = map[string]frame{
 	"\\desc-chat": {
 		t:             TokenTypeDescribeChatCmd,
 		keyword:       "desc-chat",
+		requiredProps: map[string]propertyType{},
+		optionalProps: map[string]propertyType{},
+	},
+	"\\list-provider": {
+		t:             TokenTypeListProviderCmd,
+		keyword:       "list-provider",
+		requiredProps: map[string]propertyType{},
+		optionalProps: map[string]propertyType{},
+		singleton:     true,
+	},
+	"\\del-provider": {
+		t:             TokenTypeDelProviderCmd,
+		keyword:       "del-provider",
 		requiredProps: map[string]propertyType{},
 		optionalProps: map[string]propertyType{},
 	},

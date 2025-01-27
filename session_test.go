@@ -302,6 +302,40 @@ func TestSession_Execute(t *testing.T) {
 			content: `\desc-chat`,
 			wantErr: true,
 		},
+		{
+			name:    "list provider command",
+			content: `\list-provider`,
+			validate: func(t *testing.T, called *bool, args []interface{}) {
+				if !*called {
+					t.Error("OnListProviders callback was not called")
+				}
+				if len(args) != 0 {
+					t.Errorf("expected 0 args, got %d", len(args))
+				}
+			},
+		},
+		{
+			name:    "delete provider command",
+			content: `\del-provider "test-provider"`,
+			validate: func(t *testing.T, called *bool, args []interface{}) {
+				if !*called {
+					t.Error("OnDeleteProvider callback was not called")
+				}
+				if len(args) != 1 {
+					t.Errorf("expected 1 arg, got %d", len(args))
+				}
+				name := args[0].(string)
+				name = strings.Trim(name, `"`)
+				if name != "test-provider" {
+					t.Errorf("expected name 'test-provider', got %s", name)
+				}
+			},
+		},
+		{
+			name:    "delete provider missing name",
+			content: `\del-provider`,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -328,6 +362,8 @@ func TestSession_Execute(t *testing.T) {
 				deleteContextCalled   bool
 				describeContextCalled bool
 				describeChatCalled    bool
+				listProvidersCalled   bool
+				deleteProviderCalled  bool
 				callbackArgs          []interface{}
 			)
 
@@ -362,13 +398,23 @@ func TestSession_Execute(t *testing.T) {
 					callbackArgs = []interface{}{name}
 					return nil
 				},
-				OnDescribeContext: func(name string) error {
+				OnDescribeContext: func(name string) (string, error) {
 					describeContextCalled = true
 					callbackArgs = []interface{}{name}
-					return nil
+					return "", nil
 				},
-				OnDescribeChat: func(name string) error {
+				OnDescribeChat: func(name string) (string, error) {
 					describeChatCalled = true
+					callbackArgs = []interface{}{name}
+					return "", nil
+				},
+				OnListProviders: func() ([]string, error) {
+					listProvidersCalled = true
+					callbackArgs = []interface{}{}
+					return []string{}, nil
+				},
+				OnDeleteProvider: func(name string) error {
+					deleteProviderCalled = true
 					callbackArgs = []interface{}{name}
 					return nil
 				},
@@ -406,6 +452,10 @@ func TestSession_Execute(t *testing.T) {
 				called = &describeContextCalled
 			case "desc-chat":
 				called = &describeChatCalled
+			case "list-provider":
+				called = &listProvidersCalled
+			case "del-provider":
+				called = &deleteProviderCalled
 			}
 
 			// Validate callback and args
