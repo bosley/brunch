@@ -19,6 +19,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bosley/brunch"
 	"github.com/bosley/brunch/anthropic"
@@ -28,6 +29,7 @@ var loadDir *string
 var chatEnabled bool
 var core *brunch.Core
 var logger *slog.Logger
+var busy bool
 
 const sessionId = "cli-session"
 
@@ -54,6 +56,16 @@ func main() {
 		// These are not saved to disk - only derivatives are saved
 		BaseProviders: map[string]brunch.Provider{
 			"anthropic": anthropic.InitialAnthropicProvider(),
+		},
+
+		InfoHandler: infoCb,
+		ChatStartHandler: func(req brunch.Conversation) error {
+
+			// I know this is hacky, but this is a POC and we are tossing the CLI once we start on the server so fuck off
+			busy = true
+			defer func() { busy = false }()
+			doChat(req)
+			return nil
 		},
 	})
 
@@ -106,16 +118,13 @@ func doRepl() {
 			continue
 		}
 
-		req := core.ExecuteStatement(sessionId, infoCb, stmt)
-		if req.Error != nil {
-			fmt.Printf("Error: %v\n", req.Error)
+		if err := core.ExecuteStatement(sessionId, stmt); err != nil {
+			fmt.Printf("Error: %v\n", err)
 			continue
 		}
 
-		// If the statement yields anything other than an error, it's a chat request
-		// as all other commands are handled by the core
-		if req.ChatRequest != nil {
-			doChat(req.ChatRequest.LoadedInstance)
+		for busy {
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }

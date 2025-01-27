@@ -39,20 +39,16 @@ type Core struct {
 
 	contexts map[string]*ContextSettings
 	ctxMu    sync.Mutex
+
+	chatStartHandler CoreChatStartHandler
+	infoHandler      InformationCallback
 }
 
 type CoreOpts struct {
 	InstallDirectory string
 	BaseProviders    map[string]Provider
-}
-
-// The core handles the execution, and management-of chats and their related
-// providers, data, etc. However, the core is NOT the chat instance itself.
-// If a statement requests and audiance with an llm, the core chat request
-// will be handed back in the CoreStmtExecResult following the ExecuteStatement
-// call that requested it.
-type CoreChatRequest struct {
-	LoadedInstance *chatInstance
+	ChatStartHandler CoreChatStartHandler
+	InfoHandler      InformationCallback
 }
 
 type CoreInfo struct {
@@ -67,11 +63,7 @@ type CoreDescription struct {
 	Contexts  []string
 }
 
-type CoreStmtExecResult struct {
-	Error       error
-	ChatRequest *CoreChatRequest // This will be set iff \chat was called
-
-}
+type CoreChatStartHandler func(req Conversation) error
 
 // Create a new core instance with a set of
 // providers that can be selected from. We are attempting to be
@@ -87,6 +79,8 @@ func NewCore(opts CoreOpts) *Core {
 		activeChats:      make(map[string]*chatInstance),
 		baseProviders:    opts.BaseProviders,
 		contexts:         make(map[string]*ContextSettings),
+		chatStartHandler: opts.ChatStartHandler,
+		infoHandler:      opts.InfoHandler,
 	}
 }
 
@@ -163,15 +157,15 @@ func (c *Core) EndSession(sessionId string) error {
 	return nil
 }
 
-func (c *Core) ExecuteStatement(sessionId string, info InformationCallback, stmt *Statement) CoreStmtExecResult {
+func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) error {
 
 	if stmt == nil {
-		return CoreStmtExecResult{Error: errors.New("statement is required")}
+		return errors.New("statement is required")
 	}
 
 	sanitized := strings.TrimSpace(sessionId)
 	if sanitized == "" {
-		return CoreStmtExecResult{Error: errors.New("session id is required")}
+		return errors.New("session id is required")
 	}
 	sessionId = sanitized
 
@@ -190,7 +184,6 @@ func (c *Core) ExecuteStatement(sessionId string, info InformationCallback, stmt
 		c.sesMu.Unlock()
 	}
 
-	var cr *CoreChatRequest
 	callbacks := OperationalCallback{
 		OnNewChat:        c.NewChat,
 		OnNewProvider:    c.newProviderFromStatement,
@@ -204,13 +197,8 @@ func (c *Core) ExecuteStatement(sessionId string, info InformationCallback, stmt
 			if err != nil {
 				return err
 			}
-			cr = &CoreChatRequest{
-				LoadedInstance: ci,
-			}
-
-			// Set the chat name in the session so we can track it from the user (who knows how many chats theyll have so we tie per-session)
 			session.activeChatId = name
-			return nil
+			return c.chatStartHandler(ci)
 		},
 
 		OnListChats: func() error {
@@ -218,7 +206,7 @@ func (c *Core) ExecuteStatement(sessionId string, info InformationCallback, stmt
 			if err != nil {
 				return err
 			}
-			info.OnListChats(data)
+			c.infoHandler.OnListChats(data)
 			return nil
 		},
 		OnListContexts: func() error {
@@ -226,7 +214,7 @@ func (c *Core) ExecuteStatement(sessionId string, info InformationCallback, stmt
 			if err != nil {
 				return err
 			}
-			info.OnListContexts(data)
+			c.infoHandler.OnListContexts(data)
 			return nil
 		},
 		OnDescribeContext: func(name string) error {
@@ -234,11 +222,11 @@ func (c *Core) ExecuteStatement(sessionId string, info InformationCallback, stmt
 			if err != nil {
 				return err
 			}
-			info.OnDescribeContext(data)
+			c.infoHandler.OnDescribeContext(data)
 			return nil
 		},
 		OnDescribeChat: func(name string) error {
-			info.OnDescribeChat(name)
+			c.infoHandler.OnDescribeChat(name)
 			return nil
 		},
 		OnListProviders: func() error {
@@ -246,16 +234,16 @@ func (c *Core) ExecuteStatement(sessionId string, info InformationCallback, stmt
 			if err != nil {
 				return err
 			}
-			info.OnListProviders(data)
+			c.infoHandler.OnListProviders(data)
 			return nil
 		},
 	}
 
 	err := session.execute(stmt, callbacks)
 	if err != nil {
-		return CoreStmtExecResult{Error: err}
+		return err
 	}
-	return CoreStmtExecResult{ChatRequest: cr}
+	return nil
 }
 
 // When the statement execution is done, the user may have executed a statement to create a new provider
