@@ -32,7 +32,7 @@ type Core struct {
 	sessions map[string]*coreSession
 	sesMu    sync.Mutex
 
-	activeChats map[string]*ChatInstance
+	activeChats map[string]*chatInstance
 	chatMu      sync.Mutex
 
 	baseProviders map[string]Provider
@@ -52,7 +52,7 @@ type CoreOpts struct {
 // will be handed back in the CoreStmtExecResult following the ExecuteStatement
 // call that requested it.
 type CoreChatRequest struct {
-	LoadedInstance *ChatInstance
+	LoadedInstance *chatInstance
 }
 
 type CoreStmtExecResult struct {
@@ -71,13 +71,13 @@ func NewCore(opts CoreOpts) *Core {
 		installDirectory: opts.InstallDirectory,
 		providers:        opts.BaseProviders,
 		sessions:         make(map[string]*coreSession),
-		activeChats:      make(map[string]*ChatInstance),
+		activeChats:      make(map[string]*chatInstance),
 		baseProviders:    opts.BaseProviders,
 		contexts:         make(map[string]*ContextSettings),
 	}
 }
 
-func (c *Core) GetActiveChat(name string) (*ChatInstance, error) {
+func (c *Core) GetActiveChat(name string) (*chatInstance, error) {
 	c.chatMu.Lock()
 	defer c.chatMu.Unlock()
 	chat, ok := c.activeChats[name]
@@ -332,6 +332,7 @@ func (c *Core) LoadContexts() error {
 		if err := json.Unmarshal([]byte(content), &ctx); err != nil {
 			return fmt.Errorf("failed to unmarshal context settings from %s: %w", file.Name(), err)
 		}
+
 		c.contexts[ctx.Name] = &ctx
 	}
 	return nil
@@ -340,7 +341,7 @@ func (c *Core) LoadContexts() error {
 // This creates a chat instance, but it does not load it. It defines it so that the user can
 // load it later (think of it like making a db table)
 func (c *Core) NewChat(name string, providerName string) error {
-	var chat *ChatInstance
+	var chat *chatInstance
 	{
 		c.provMu.Lock()
 		defer c.provMu.Unlock()
@@ -358,7 +359,7 @@ func (c *Core) NewChat(name string, providerName string) error {
 		chatSettings.Name = name
 		chatSettings.Host = providerName
 		cloned := provider.CloneWithSettings(chatSettings)
-		chat = NewChatInstance(cloned)
+		chat = newChatInstance(cloned)
 	}
 
 	return c.writeSnapshot(name, chat)
@@ -366,7 +367,7 @@ func (c *Core) NewChat(name string, providerName string) error {
 
 func (c *Core) SaveActiveChat(sessionName string) error {
 	var target string
-	var chat *ChatInstance
+	var chat *chatInstance
 	{
 		c.sesMu.Lock()
 		session, exists := c.sessions[sessionName]
@@ -389,7 +390,7 @@ func (c *Core) SaveActiveChat(sessionName string) error {
 	return c.writeSnapshot(target, chat)
 }
 
-func (c *Core) writeSnapshot(ssName string, chat *ChatInstance) error {
+func (c *Core) writeSnapshot(ssName string, chat *chatInstance) error {
 	ss, err := chat.Snapshot()
 	if err != nil {
 		return err
@@ -404,7 +405,7 @@ func (c *Core) writeSnapshot(ssName string, chat *ChatInstance) error {
 	return nil
 }
 
-func (c *Core) loadChat(name string, hash *string) (*ChatInstance, error) {
+func (c *Core) loadChat(name string, hash *string) (*chatInstance, error) {
 	{
 		c.chatMu.Lock()
 		chat, exists := c.activeChats[name]
@@ -428,7 +429,7 @@ func (c *Core) loadChat(name string, hash *string) (*ChatInstance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal chat snapshot: %w", err)
 	}
-	chat, err := NewChatInstanceFromSnapshot(c, &snapshot)
+	chat, err := newChatInstanceFromSnapshot(c, &snapshot)
 	if err != nil {
 		return nil, err
 	}

@@ -1,35 +1,96 @@
 package brunch
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 )
 
-type Panel interface {
+// The panel is an interface for the user of brunch to interact with our chat instance
+// in a way that is easy to understand and use
+type Conversation interface {
+
+	// Print the entire tree of the conversation, which includes all branches
 	PrintTree() string
+
+	// Print the history of the conversation, on the current branch back to the root
 	PrintHistory() string
+
+	// Queue images to be sent to the provider
 	QueueImages(paths []string) error
+
+	// Snapshot the current state of the conversation
 	Snapshot() (*Snapshot, error)
 
+	// Get the artifacts from the current node (not the entire conversation)
 	Artifacts() []Artifact
 
-	AttachContext(ctx *ContextSettings) error
+	// Attach a context to the conversation that the chat provider _may_ use
+	// within the conversation that is ongoing
+	CreateContext(ctx *ContextSettings) error
 
+	// Attach an existing context to the conversation
+	AttachContext(ctxName string) error
+
+	// Goto a specific node in the conversation via hash (use PrintTree of History to see hashes)
 	Goto(nodeHash string) error
+
+	// Navigate to the parent node of the current node
 	Parent() error
+
+	// Navigate to the nth child of the current node
 	Child(idx int) error
+
+	// Navigate to the root node of the conversation
 	Root() error
 
+	// List the children of the current node
 	ListChildren() []string
+
+	// Check if the current node has a parent
 	HasParent() bool
 
+	// Toggle the chat on or off (soft disable)
 	ToggleChat(enabled bool)
+
+	// Get info about the current state of the chat
 	Info() string
+
+	// Get the current node of the conversation
+	CurrentNode() Node
+
+	// Submit a message to the chat provider
+	SubmitMessage(message string) (string, error)
 }
 
-type ChatInstance struct {
+// The snapshot is a hollistic snapshot of the current state of the chat
+// It includes the provider name, the active branch, the contents of the conversation,
+// and the contexts that are attached to the conversation. If a chat is saved with contexts
+// then then all of the contextual configuration information MUST be available at the time of
+// load. Snapshots save references to internal brunch resources on disk so they must
+// be persisent and available at the time of load.
+type Snapshot struct {
+	ProviderName string   `json:"provider_name"`
+	ActiveBranch string   `json:"active_branch"`
+	Contents     []byte   `json:"contents"`
+	Contexts     []string `json:"contexts"`
+}
+
+func (s *Snapshot) Marshal() ([]byte, error) {
+	return json.Marshal(s)
+}
+
+func SnapshotFromJSON(data []byte) (*Snapshot, error) {
+	var snapshot Snapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
+	}
+	return &snapshot, nil
+}
+
+type chatInstance struct {
 	core         *Core
 	provider     Provider
 	root         RootNode
@@ -40,9 +101,9 @@ type ChatInstance struct {
 	contexts map[string]*ContextSettings
 }
 
-func NewChatInstance(provider Provider) *ChatInstance {
+func newChatInstance(provider Provider) *chatInstance {
 	root := provider.NewConversationRoot()
-	chat := &ChatInstance{
+	chat := &chatInstance{
 		provider:     provider,
 		root:         root,
 		chatEnabled:  true,
@@ -53,7 +114,7 @@ func NewChatInstance(provider Provider) *ChatInstance {
 	return chat
 }
 
-func NewChatInstanceFromSnapshot(core *Core, snap *Snapshot) (*ChatInstance, error) {
+func newChatInstanceFromSnapshot(core *Core, snap *Snapshot) (*chatInstance, error) {
 	root, err := unmarshalNode(snap.Contents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
@@ -69,7 +130,7 @@ func NewChatInstanceFromSnapshot(core *Core, snap *Snapshot) (*ChatInstance, err
 		return nil, fmt.Errorf("provider %s not found", snap.ProviderName)
 	}
 
-	chat := &ChatInstance{
+	chat := &chatInstance{
 		core:         core,
 		provider:     provider,
 		root:         *rootNode,
@@ -108,7 +169,7 @@ func NewChatInstanceFromSnapshot(core *Core, snap *Snapshot) (*ChatInstance, err
 }
 
 // SubmitMessage sends a message to the provider and returns the response
-func (c *ChatInstance) SubmitMessage(message string) (string, error) {
+func (c *chatInstance) SubmitMessage(message string) (string, error) {
 	if !c.chatEnabled {
 		return "", nil
 	}
@@ -124,17 +185,15 @@ func (c *ChatInstance) SubmitMessage(message string) (string, error) {
 		return "", err
 	}
 
-	fmt.Println("attached contexts:", c.contexts)
-
 	c.currentNode = msgPair
 	return msgPair.Assistant.UnencodedContent(), nil
 }
 
-func (c *ChatInstance) PrintTree() string {
+func (c *chatInstance) PrintTree() string {
 	return PrintTree(&c.root)
 }
 
-func (c *ChatInstance) PrintHistory() string {
+func (c *chatInstance) PrintHistory() string {
 	result := c.currentNode.History()
 	switch c.currentNode.Type() {
 	case NT_MESSAGE_PAIR:
@@ -154,12 +213,12 @@ func (c *ChatInstance) PrintHistory() string {
 	return strings.Join(result, "\n")
 }
 
-func (c *ChatInstance) QueueImages(paths []string) error {
+func (c *chatInstance) QueueImages(paths []string) error {
 	c.queuedImages = append(c.queuedImages, paths...)
 	return nil
 }
 
-func (c *ChatInstance) Snapshot() (*Snapshot, error) {
+func (c *chatInstance) Snapshot() (*Snapshot, error) {
 	b, e := marshalNode(&c.root)
 	if e != nil {
 		return nil, e
@@ -179,7 +238,7 @@ func (c *ChatInstance) Snapshot() (*Snapshot, error) {
 	return s, nil
 }
 
-func (c *ChatInstance) Goto(nodeHash string) error {
+func (c *chatInstance) Goto(nodeHash string) error {
 	nodeMap := MapTree(&c.root)
 	if node, exists := nodeMap[nodeHash]; exists {
 		c.currentNode = node
@@ -188,7 +247,7 @@ func (c *ChatInstance) Goto(nodeHash string) error {
 	return errors.New("node not found")
 }
 
-func (c *ChatInstance) Parent() error {
+func (c *chatInstance) Parent() error {
 	switch c.currentNode.Type() {
 	case NT_MESSAGE_PAIR:
 		if mpn, ok := c.currentNode.(*MessagePairNode); ok && mpn.Parent != nil {
@@ -202,7 +261,7 @@ func (c *ChatInstance) Parent() error {
 	return errors.New("invalid node type")
 }
 
-func (c *ChatInstance) Child(idx int) error {
+func (c *chatInstance) Child(idx int) error {
 	switch c.currentNode.Type() {
 	case NT_ROOT:
 		if rn, ok := c.currentNode.(*RootNode); ok && idx < len(rn.Children) {
@@ -220,12 +279,12 @@ func (c *ChatInstance) Child(idx int) error {
 	return errors.New("invalid node type")
 }
 
-func (c *ChatInstance) Root() error {
+func (c *chatInstance) Root() error {
 	c.currentNode = &c.root
 	return nil
 }
 
-func (c *ChatInstance) HasParent() bool {
+func (c *chatInstance) HasParent() bool {
 	switch c.currentNode.Type() {
 	case NT_MESSAGE_PAIR:
 		if mpn, ok := c.currentNode.(*MessagePairNode); ok {
@@ -235,7 +294,7 @@ func (c *ChatInstance) HasParent() bool {
 	return false
 }
 
-func (c *ChatInstance) ListChildren() []string {
+func (c *chatInstance) ListChildren() []string {
 	switch c.currentNode.Type() {
 	case NT_ROOT:
 		if rn, ok := c.currentNode.(*RootNode); ok {
@@ -257,19 +316,19 @@ func (c *ChatInstance) ListChildren() []string {
 	return []string{}
 }
 
-func (c *ChatInstance) Info() string {
+func (c *chatInstance) Info() string {
 	return fmt.Sprintf("current node: %s", c.currentNode.Hash())
 }
 
-func (c *ChatInstance) ToggleChat(enabled bool) {
+func (c *chatInstance) ToggleChat(enabled bool) {
 	c.chatEnabled = enabled
 }
 
-func (c *ChatInstance) CurrentNode() Node {
+func (c *chatInstance) CurrentNode() Node {
 	return c.currentNode
 }
 
-func (c *ChatInstance) Artifacts() []Artifact {
+func (c *chatInstance) Artifacts() []Artifact {
 	switch c.currentNode.Type() {
 	case NT_MESSAGE_PAIR:
 		if mpn, ok := c.currentNode.(*MessagePairNode); ok {
@@ -284,10 +343,28 @@ func (c *ChatInstance) Artifacts() []Artifact {
 	return []Artifact{}
 }
 
-func (c *ChatInstance) AttachContext(ctx *ContextSettings) error {
+func (c *chatInstance) CreateContext(ctx *ContextSettings) error {
+	if err := c.provider.AttachKnowledgeContext(*ctx); err != nil {
+		return err
+	}
+
 	if err := c.core.newContextFromAttached(ctx); err != nil {
 		return err
 	}
 	c.contexts[ctx.Name] = ctx
+	return nil
+}
+
+func (c *chatInstance) AttachContext(ctxName string) error {
+	ctx, exists := c.core.contexts[ctxName]
+	if !exists {
+		return fmt.Errorf("context %s not found", ctxName)
+	}
+
+	if err := c.provider.AttachKnowledgeContext(*ctx); err != nil {
+		return err
+	}
+
+	c.contexts[ctxName] = ctx
 	return nil
 }

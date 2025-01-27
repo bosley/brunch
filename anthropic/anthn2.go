@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -202,4 +203,10 @@ func (ap *AnthropicProvider) CloneWithSettings(settings brunch.ProviderSettings)
 		os.Exit(1)
 	}
 	return NewAnthropicProvider(settings.Host, settings.Name, client)
+}
+
+func (ap *AnthropicProvider) AttachKnowledgeContext(ctx brunch.ContextSettings) error {
+
+	// This isn't going to be implemented for the basic anthropic client
+	return errors.New("not implemented for anthropic client")
 }

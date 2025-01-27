@@ -104,7 +104,7 @@ func doRepl() {
 
 // Perform the actual chat with the person. This will eventually be diffused into a server
 // that could be repld if I decide to make this a web app.
-func doChat(chat *brunch.ChatInstance) {
+func doChat(chat brunch.Conversation) {
 
 	banner()
 
@@ -166,7 +166,7 @@ func doChat(chat *brunch.ChatInstance) {
 	}
 }
 
-func handleCommand(panel brunch.Panel, line string) (bool, error) {
+func handleCommand(conversation brunch.Conversation, line string) (bool, error) {
 	parts := strings.Split(line, " ")
 	switch parts[0] {
 	case "\\?":
@@ -188,22 +188,23 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 		// When a context is added via a chat, it is automatically saved to disk and will be mandatory for the chat
 		// to be restored in the future.
 		fmt.Println("\t\\new-k: Attach new knowledge-context [attach a non-existing knowledge-context to the chat]")
+		fmt.Println("\t\\attach-k: Attach existing knowledge-context [attach an existing knowledge-context to the chat]")
 	case "\\l":
-		fmt.Println(panel.PrintHistory())
+		fmt.Println(conversation.PrintHistory())
 	case "\\t":
-		fmt.Println(panel.PrintTree())
+		fmt.Println(conversation.PrintTree())
 	case "\\i":
 		fmt.Println("Enter image path:")
 		var imagePath string
 		fmt.Scanln(&imagePath)
-		if err := panel.QueueImages([]string{imagePath}); err != nil {
+		if err := conversation.QueueImages([]string{imagePath}); err != nil {
 			fmt.Println("Failed to queue image:", err)
 			return true, err
 		}
 	case "\\s":
 		saveSnapshot()
 	case "\\p":
-		if err := panel.Parent(); err != nil {
+		if err := conversation.Parent(); err != nil {
 			fmt.Println("failed to go to parent", err)
 			return true, err
 		}
@@ -217,12 +218,12 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 			fmt.Println("failed to parse index", err)
 			return true, err
 		}
-		if err := panel.Child(idx); err != nil {
+		if err := conversation.Child(idx); err != nil {
 			fmt.Println("failed to go to child", err)
 			return true, err
 		}
 	case "\\r":
-		if err := panel.Root(); err != nil {
+		if err := conversation.Root(); err != nil {
 			fmt.Println("failed to go to root", err)
 			return true, err
 		}
@@ -231,15 +232,15 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 			fmt.Println("usage: \\g <node_hash>")
 			return false, nil
 		}
-		if err := panel.Goto(parts[1]); err != nil {
+		if err := conversation.Goto(parts[1]); err != nil {
 			fmt.Println("failed to go to node", err)
 			return true, err
 		}
 	case "\\.":
-		if panel.HasParent() {
+		if conversation.HasParent() {
 			fmt.Println("current node has parent; use \\p to access")
 		}
-		children := panel.ListChildren()
+		children := conversation.ListChildren()
 		if len(children) == 0 {
 			fmt.Println("current node has no children")
 			return false, nil
@@ -251,10 +252,10 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 		fmt.Println("\nuse \\c <idx> to go to child")
 	case "\\x":
 		chatEnabled = !chatEnabled
-		panel.ToggleChat(chatEnabled)
+		conversation.ToggleChat(chatEnabled)
 		fmt.Printf("chat enabled: %t\n", chatEnabled)
 	case "\\a":
-		return handleArtifacting(panel, parts)
+		return handleArtifacting(conversation, parts)
 	case "\\new-k":
 		if len(parts) < 4 {
 			fmt.Println("usage: \\new-k <name> <type> <value>")
@@ -285,7 +286,19 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 			Type:  brunch.ContextType(ctxType),
 			Value: ctxValue,
 		}
-		if err := panel.AttachContext(ctx); err != nil {
+		if err := conversation.CreateContext(ctx); err != nil {
+			fmt.Println("failed to attach context", err)
+			return true, err
+		}
+		fmt.Println("attached context", ctxName, "to chat")
+
+	case "\\attach-k":
+		if len(parts) < 2 {
+			fmt.Println("usage: \\attach-k <name>")
+			return false, nil
+		}
+		ctxName := parts[1]
+		if err := conversation.AttachContext(ctxName); err != nil {
 			fmt.Println("failed to attach context", err)
 			return true, err
 		}
@@ -333,9 +346,9 @@ func isNonReplQuit(line string) bool {
 	return false
 }
 
-func handleArtifacting(panel brunch.Panel, parts []string) (bool, error) {
+func handleArtifacting(conversation brunch.Conversation, parts []string) (bool, error) {
 
-	artifacts := panel.Artifacts()
+	artifacts := conversation.Artifacts()
 	if len(artifacts) == 0 {
 		fmt.Println("No artifacts in current node")
 		return false, nil

@@ -1,10 +1,3 @@
-/*
-	A session isn't a chat session, rather, its a command execution session. Its the context in which
-	all of the commands are executed from given statements.
-	These sessions setup and configure chats/providers with the core for interaction with the user
-	It can be thought of as a "workspace" for a singular, or series-of, chat session(s).
-*/
-
 package brunch
 
 import (
@@ -13,6 +6,9 @@ import (
 	"strconv"
 )
 
+// An operational callback is used when a session with a user (pre-chat interface) is in process.
+// When they submit a commmand via the core, it will use these callbacks to receive instructions
+// based on the command when `execucte` is called (below)
 type OperationalCallback struct {
 	OnLoadChat    func(name string, hash *string) error
 	OnNewChat     func(name string, provider string) error
@@ -25,7 +21,7 @@ type coreSession struct {
 	activeChatId string
 }
 
-// Send a statement to the session
+// Send a statement to the session (called by the core)
 func (s *coreSession) execute(stmt *Statement, callbacks OperationalCallback) error {
 
 	if !stmt.IsPrepared() {

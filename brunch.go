@@ -21,17 +21,49 @@ type ProviderSettings struct {
 	SystemPrompt string  `json:"system_prompt"`
 }
 
+// A provider is an abstraction of some (presumably LLM) message generation service
+// though it could be anything that generates messages i guess
 type Provider interface {
+
+	// NewConversationRoot creates a new root node for a new conversation
+	// from which all messages will be derived
 	NewConversationRoot() RootNode
+
+	// ExtendFrom takes a node and returns a function that can be used to create a new message pair node
+	// This means that this is the function we call in order to get a function to send a message,
+	// and then receive a response
 	ExtendFrom(Node) MessageCreator
+
+	// GetRoot takes a node and returns the root node
 	GetRoot(Node) RootNode
+
+	// GetHistory takes a node and returns the history of the conversation
 	GetHistory(Node) []map[string]string
+
+	// QueueImages takes a list of image urls and queues them for attachment to the next message
+	// In this way we can ask about images in the conversation and do analysis on them
+	// If the provider doesn't support images, this should return an error
 	QueueImages([]string) error
 
+	// Settings returns the settings for the provider
 	Settings() ProviderSettings
+
+	// CloneWithSettings returns a new provider with the given settings
+	// This is so we can derive providers from existing providers at runtime
+	// and have them be available to the user
 	CloneWithSettings(ProviderSettings) Provider
+
+	// AttachKnowledgeContext attaches a knowledge context to the provider
+	// A knowledge context could be a directory, a database, a web page, etc.
+	// HOW the knowledge is incorperated into the conversation is up to the provider
+	// and if the provider doesn't support knowledge contexts, this should return an error
+	AttachKnowledgeContext(ContextSettings) error
 }
 
+// A context type is a type of knowledge that can be attached to a conversation
+// This could be a directory, a database, a web page, etc.
+// HOW the knowledge is incorperated into the conversation is up to the provider
+// and if the provider doesn't support knowledge contexts, this should return an error
 type ContextType string
 
 const (
@@ -51,6 +83,9 @@ const (
 	NT_MESSAGE_PAIR NodeTyppe = "message_pair"
 )
 
+// A Node is either a root, or a PAIR of messages (user and provider)
+// We seperate into pairs of messages to constrain the conversation
+// as a request->generation || failure
 type Node interface {
 	Type() NodeTyppe
 	Hash() string
@@ -159,6 +194,9 @@ func NewRootNode(opts RootOpt) *RootNode {
 	return root
 }
 
+// NewMessageData creates a new message data object and ensures
+// that the content is base64 encoded as when we save things we don't want messages
+// to bonk our json, and it helps keep the data clean
 func NewMessageData(role string, unencodedContent string) *MessageData {
 	return &MessageData{
 		Role:              role,
@@ -167,6 +205,8 @@ func NewMessageData(role string, unencodedContent string) *MessageData {
 	}
 }
 
+// UnencodedContent returns the raw content of the message
+// if the message is not base64 encoded, it will return the base64 encoded content
 func (m *MessageData) UnencodedContent() string {
 	if m.RawContent != "" {
 		return m.RawContent
