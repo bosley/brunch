@@ -18,11 +18,26 @@ type OperationalCallback struct {
 	OnDeleteContext  func(name string) error
 	OnDeleteProvider func(name string) error
 
-	OnListChats       func() ([]string, error)
-	OnListProviders   func() ([]string, error)
-	OnListContexts    func() ([]string, error)
-	OnDescribeContext func(name string) (string, error)
-	OnDescribeChat    func(name string) (string, error)
+	// These operational callbacks may be user to get information and forward to the InformationCallback,
+	// BUT not NECESARILY. The InformationCallback is offered as a means to pipe informational data to a user
+	// regardless of their connection to the server. However its not mandatory for the implementation to do so
+	OnListChats       func() error
+	OnListProviders   func() error
+	OnListContexts    func() error
+	OnDescribeContext func(name string) error
+	OnDescribeChat    func(name string) error
+}
+
+// Informational callbacks are given to the core so that the user of the core can
+// institute the display of information requested from a query regardless if the implementation
+// is one of a CLI app, server, etc. This way the "backend" doesn't make any assumptions
+// about how the hell the information is supposed to get out
+type InformationCallback struct {
+	OnListChats       func(chats []string)
+	OnListProviders   func(providers []string)
+	OnListContexts    func(contexts []string)
+	OnDescribeContext func(data string)
+	OnDescribeChat    func(data string)
 }
 
 type coreSession struct {
@@ -65,35 +80,15 @@ func (s *coreSession) execute(stmt *Statement, callbacks OperationalCallback) er
 	case "del-provider":
 		return s.deleteProvider(stmt.cmd.nameGiven, callbacks)
 	case "list-chat":
-		data, err := s.listChats(callbacks)
-		if err != nil {
-			return err
-		}
-		return s.handleDisplay(stmt.cmd.keyword, data)
+		return s.listChats(callbacks)
 	case "list-ctx":
-		data, err := s.listContexts(callbacks)
-		if err != nil {
-			return err
-		}
-		return s.handleDisplay(stmt.cmd.keyword, data)
+		return s.listContexts(callbacks)
 	case "desc-ctx":
-		data, err := s.describeContext(stmt.cmd.nameGiven, callbacks)
-		if err != nil {
-			return err
-		}
-		return s.handleDisplay(stmt.cmd.keyword, []string{data})
+		return s.describeContext(stmt.cmd.nameGiven, callbacks)
 	case "desc-chat":
-		data, err := s.describeChat(stmt.cmd.nameGiven, callbacks)
-		if err != nil {
-			return err
-		}
-		return s.handleDisplay(stmt.cmd.keyword, []string{data})
+		return s.describeChat(stmt.cmd.nameGiven, callbacks)
 	case "list-provider":
-		data, err := s.listProviders(callbacks)
-		if err != nil {
-			return err
-		}
-		return s.handleDisplay(stmt.cmd.keyword, data)
+		return s.listProviders(callbacks)
 	}
 
 	return errors.New("not implemented")
@@ -264,29 +259,29 @@ func (s *coreSession) deleteContext(name string, callbacks OperationalCallback) 
 	return callbacks.OnDeleteContext(name)
 }
 
-func (s *coreSession) listChats(callbacks OperationalCallback) ([]string, error) {
+func (s *coreSession) listChats(callbacks OperationalCallback) error {
 	return callbacks.OnListChats()
 }
 
-func (s *coreSession) listContexts(callbacks OperationalCallback) ([]string, error) {
+func (s *coreSession) listContexts(callbacks OperationalCallback) error {
 	return callbacks.OnListContexts()
 }
 
-func (s *coreSession) describeContext(name string, callbacks OperationalCallback) (string, error) {
+func (s *coreSession) describeContext(name string, callbacks OperationalCallback) error {
 	if name == "" {
-		return "", fmt.Errorf("name must be specified")
+		return fmt.Errorf("name must be specified")
 	}
 	return callbacks.OnDescribeContext(name)
 }
 
-func (s *coreSession) describeChat(name string, callbacks OperationalCallback) (string, error) {
+func (s *coreSession) describeChat(name string, callbacks OperationalCallback) error {
 	if name == "" {
-		return "", fmt.Errorf("name must be specified")
+		return fmt.Errorf("name must be specified")
 	}
 	return callbacks.OnDescribeChat(name)
 }
 
-func (s *coreSession) listProviders(callbacks OperationalCallback) ([]string, error) {
+func (s *coreSession) listProviders(callbacks OperationalCallback) error {
 	return callbacks.OnListProviders()
 }
 
@@ -295,31 +290,4 @@ func (s *coreSession) deleteProvider(name string, callbacks OperationalCallback)
 		return fmt.Errorf("name must be specified")
 	}
 	return callbacks.OnDeleteProvider(name)
-}
-
-func (s *coreSession) handleDisplay(what string, data []string) error {
-	switch what {
-	case "list-chat":
-		fmt.Println("Chats:")
-		for _, chat := range data {
-			fmt.Println("\t", chat)
-		}
-	case "list-ctx":
-		fmt.Println("Contexts:")
-		for _, ctx := range data {
-			fmt.Println("\t", ctx)
-		}
-	case "desc-ctx":
-		fmt.Println("Context:")
-		fmt.Println(data)
-	case "desc-chat":
-		fmt.Println("Chat:")
-		fmt.Println("\n", data[0])
-	case "list-provider":
-		fmt.Println("Providers:")
-		for _, provider := range data {
-			fmt.Println("\t", provider)
-		}
-	}
-	return nil
 }

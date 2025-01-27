@@ -1,3 +1,13 @@
+/*
+This is the CLI application being made to construct the brunch core and statement system.
+This cli adds a secondary REPL to interact with the chats via the conversation interface
+in the core.
+
+This is mostly the POC application for the core and statement system, and once we get a
+somewhat stable core/statement/storage/exec system I intend to create a fuego-based server
+to interact with the system.
+*/
+
 package main
 
 import (
@@ -20,6 +30,14 @@ var core *brunch.Core
 var logger *slog.Logger
 
 const sessionId = "cli-session"
+
+var infoCb = brunch.InformationCallback{
+	OnListChats:       infoCbListChats,
+	OnListProviders:   infoCbListProviders,
+	OnListContexts:    infoCbListContexts,
+	OnDescribeContext: infoCbDescribeContext,
+	OnDescribeChat:    infoCbDescribeChat,
+}
 
 func main() {
 	logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -88,7 +106,7 @@ func doRepl() {
 			continue
 		}
 
-		req := core.ExecuteStatement(sessionId, stmt)
+		req := core.ExecuteStatement(sessionId, infoCb, stmt)
 		if req.Error != nil {
 			fmt.Printf("Error: %v\n", req.Error)
 			continue
@@ -435,4 +453,35 @@ func handleArtifacting(conversation brunch.Conversation, parts []string) (bool, 
 		}
 	}
 	return false, nil
+}
+
+func infoCbListChats(chats []string) {
+	fmt.Println("Chats:")
+	for _, chat := range chats {
+		fmt.Println("\t", chat)
+	}
+}
+
+func infoCbListProviders(providers []string) {
+	fmt.Println("Providers:")
+	for _, provider := range providers {
+		fmt.Println("\t", provider)
+	}
+}
+
+func infoCbListContexts(contexts []string) {
+	fmt.Println("Contexts:")
+	for _, context := range contexts {
+		fmt.Println("\t", context)
+	}
+}
+
+func infoCbDescribeContext(data string) {
+	fmt.Println("Context:")
+	fmt.Println("\t", data)
+}
+
+func infoCbDescribeChat(data string) {
+	fmt.Println("Chat:")
+	fmt.Println("\t", data)
 }

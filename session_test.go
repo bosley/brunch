@@ -398,20 +398,20 @@ func TestSession_Execute(t *testing.T) {
 					callbackArgs = []interface{}{name}
 					return nil
 				},
-				OnDescribeContext: func(name string) (string, error) {
+				OnDescribeContext: func(name string) error {
 					describeContextCalled = true
 					callbackArgs = []interface{}{name}
-					return "", nil
+					return nil
 				},
-				OnDescribeChat: func(name string) (string, error) {
+				OnDescribeChat: func(name string) error {
 					describeChatCalled = true
 					callbackArgs = []interface{}{name}
-					return "", nil
+					return nil
 				},
-				OnListProviders: func() ([]string, error) {
+				OnListProviders: func() error {
 					listProvidersCalled = true
 					callbackArgs = []interface{}{}
-					return []string{}, nil
+					return nil
 				},
 				OnDeleteProvider: func(name string) error {
 					deleteProviderCalled = true

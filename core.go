@@ -55,9 +55,22 @@ type CoreChatRequest struct {
 	LoadedInstance *chatInstance
 }
 
+type CoreInfo struct {
+	Chats     []string
+	Providers []string
+	Contexts  []string
+}
+
+type CoreDescription struct {
+	Chats     []string
+	Providers []string
+	Contexts  []string
+}
+
 type CoreStmtExecResult struct {
 	Error       error
 	ChatRequest *CoreChatRequest // This will be set iff \chat was called
+
 }
 
 // Create a new core instance with a set of
@@ -150,7 +163,7 @@ func (c *Core) EndSession(sessionId string) error {
 	return nil
 }
 
-func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) CoreStmtExecResult {
+func (c *Core) ExecuteStatement(sessionId string, info InformationCallback, stmt *Statement) CoreStmtExecResult {
 
 	if stmt == nil {
 		return CoreStmtExecResult{Error: errors.New("statement is required")}
@@ -179,15 +192,13 @@ func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) CoreStmtExecR
 
 	var cr *CoreChatRequest
 	callbacks := OperationalCallback{
-		OnNewChat:         c.NewChat,
-		OnNewProvider:     c.newProviderFromStatement,
-		OnNewContext:      c.newContext,
-		OnListChats:       c.onListChats,
-		OnListContexts:    c.onListContexts,
-		OnDescribeContext: c.onDescribeContext,
-		OnDescribeChat:    c.onDescribeChat,
-		OnListProviders:   c.onListProviders,
-		OnDeleteProvider:  c.onDeleteProvider,
+		OnNewChat:        c.NewChat,
+		OnNewProvider:    c.newProviderFromStatement,
+		OnNewContext:     c.newContext,
+		OnDeleteProvider: c.onDeleteProvider,
+		OnDeleteChat:     c.deleteChat,
+		OnDeleteContext:  c.deleteContext,
+
 		OnLoadChat: func(name string, hash *string) error {
 			ci, err := c.loadChat(name, hash)
 			if err != nil {
@@ -201,8 +212,43 @@ func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) CoreStmtExecR
 			session.activeChatId = name
 			return nil
 		},
-		OnDeleteChat:    c.deleteChat,
-		OnDeleteContext: c.deleteContext,
+
+		OnListChats: func() error {
+			data, err := c.onListChats()
+			if err != nil {
+				return err
+			}
+			info.OnListChats(data)
+			return nil
+		},
+		OnListContexts: func() error {
+			data, err := c.onListContexts()
+			if err != nil {
+				return err
+			}
+			info.OnListContexts(data)
+			return nil
+		},
+		OnDescribeContext: func(name string) error {
+			data, err := c.onDescribeContext(name)
+			if err != nil {
+				return err
+			}
+			info.OnDescribeContext(data)
+			return nil
+		},
+		OnDescribeChat: func(name string) error {
+			info.OnDescribeChat(name)
+			return nil
+		},
+		OnListProviders: func() error {
+			data, err := c.onListProviders()
+			if err != nil {
+				return err
+			}
+			info.OnListProviders(data)
+			return nil
+		},
 	}
 
 	err := session.execute(stmt, callbacks)
