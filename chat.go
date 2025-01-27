@@ -3,6 +3,7 @@ package brunch
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -13,6 +14,8 @@ type Panel interface {
 	Snapshot() (*Snapshot, error)
 
 	Artifacts() []Artifact
+
+	AttachContext(ctx *ContextSettings) error
 
 	Goto(nodeHash string) error
 	Parent() error
@@ -27,11 +30,14 @@ type Panel interface {
 }
 
 type ChatInstance struct {
+	core         *Core
 	provider     Provider
 	root         RootNode
 	currentNode  Node
 	chatEnabled  bool
 	queuedImages []string
+
+	contexts map[string]*ContextSettings
 }
 
 func NewChatInstance(provider Provider) *ChatInstance {
@@ -41,12 +47,13 @@ func NewChatInstance(provider Provider) *ChatInstance {
 		root:         root,
 		chatEnabled:  true,
 		queuedImages: []string{},
+		contexts:     map[string]*ContextSettings{},
 	}
 	chat.currentNode = &chat.root
 	return chat
 }
 
-func NewChatInstanceFromSnapshot(providers map[string]Provider, snap *Snapshot) (*ChatInstance, error) {
+func NewChatInstanceFromSnapshot(core *Core, snap *Snapshot) (*ChatInstance, error) {
 	root, err := unmarshalNode(snap.Contents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
@@ -57,18 +64,30 @@ func NewChatInstanceFromSnapshot(providers map[string]Provider, snap *Snapshot) 
 		return nil, fmt.Errorf("snapshot does not contain a valid root node")
 	}
 
-	provider, exists := providers[snap.ProviderName]
+	provider, exists := core.providers[snap.ProviderName]
 	if !exists {
 		return nil, fmt.Errorf("provider %s not found", snap.ProviderName)
 	}
 
 	chat := &ChatInstance{
+		core:         core,
 		provider:     provider,
 		root:         *rootNode,
 		chatEnabled:  true,
 		queuedImages: []string{},
+		contexts:     map[string]*ContextSettings{},
 	}
 	chat.currentNode = &chat.root
+
+	for _, ctxName := range snap.Contexts {
+		ctx, exists := core.contexts[ctxName]
+		if !exists {
+			return nil, fmt.Errorf("context %s not found in available contexts", ctxName)
+		}
+		chat.contexts[ctxName] = ctx
+	}
+
+	slog.Debug("loaded snapshot", "num_contexts", len(chat.contexts))
 
 	if snap.ActiveBranch != "" {
 		nodeMap := MapTree(&chat.root)
@@ -84,6 +103,7 @@ func NewChatInstanceFromSnapshot(providers map[string]Provider, snap *Snapshot) 
 		}
 		return nil, fmt.Errorf("could not find active branch %s in snapshot", snap.ActiveBranch)
 	}
+
 	return chat, nil
 }
 
@@ -103,6 +123,8 @@ func (c *ChatInstance) SubmitMessage(message string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
+	fmt.Println("attached contexts:", c.contexts)
 
 	c.currentNode = msgPair
 	return msgPair.Assistant.UnencodedContent(), nil
@@ -142,11 +164,18 @@ func (c *ChatInstance) Snapshot() (*Snapshot, error) {
 	if e != nil {
 		return nil, e
 	}
+
+	contexts := []string{}
+	for _, ctx := range c.contexts {
+		contexts = append(contexts, ctx.Name)
+	}
 	s := &Snapshot{
 		ProviderName: c.provider.Settings().Host,
 		ActiveBranch: c.currentNode.Hash(),
 		Contents:     b,
+		Contexts:     contexts,
 	}
+	slog.Debug("snapshot", "snapshot", s, "num_contexts", len(contexts))
 	return s, nil
 }
 
@@ -253,4 +282,12 @@ func (c *ChatInstance) Artifacts() []Artifact {
 		}
 	}
 	return []Artifact{}
+}
+
+func (c *ChatInstance) AttachContext(ctx *ContextSettings) error {
+	if err := c.core.newContextFromAttached(ctx); err != nil {
+		return err
+	}
+	c.contexts[ctx.Name] = ctx
+	return nil
 }

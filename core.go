@@ -36,6 +36,9 @@ type Core struct {
 	chatMu      sync.Mutex
 
 	baseProviders map[string]Provider
+
+	contexts map[string]*ContextSettings
+	ctxMu    sync.Mutex
 }
 
 type CoreOpts struct {
@@ -70,6 +73,7 @@ func NewCore(opts CoreOpts) *Core {
 		sessions:         make(map[string]*coreSession),
 		activeChats:      make(map[string]*ChatInstance),
 		baseProviders:    opts.BaseProviders,
+		contexts:         make(map[string]*ContextSettings),
 	}
 }
 
@@ -307,6 +311,32 @@ func (c *Core) LoadProviders() error {
 	return nil
 }
 
+func (c *Core) LoadContexts() error {
+	dataStoreDir := filepath.Join(c.installDirectory, contextStoreDirectory)
+	files, err := os.ReadDir(dataStoreDir)
+	if err != nil {
+		return fmt.Errorf("failed to read context store directory: %w", err)
+	}
+
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+
+		content, err := c.loadFromStore(contextStoreDirectory, file.Name())
+		if err != nil {
+			return fmt.Errorf("failed to load context file %s: %w", file.Name(), err)
+		}
+
+		var ctx ContextSettings
+		if err := json.Unmarshal([]byte(content), &ctx); err != nil {
+			return fmt.Errorf("failed to unmarshal context settings from %s: %w", file.Name(), err)
+		}
+		c.contexts[ctx.Name] = &ctx
+	}
+	return nil
+}
+
 // This creates a chat instance, but it does not load it. It defines it so that the user can
 // load it later (think of it like making a db table)
 func (c *Core) NewChat(name string, providerName string) error {
@@ -398,7 +428,7 @@ func (c *Core) loadChat(name string, hash *string) (*ChatInstance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal chat snapshot: %w", err)
 	}
-	chat, err := NewChatInstanceFromSnapshot(c.providers, &snapshot)
+	chat, err := NewChatInstanceFromSnapshot(c, &snapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -436,6 +466,14 @@ func (c *Core) newContext(name string, dir *string, database *string, web *strin
 		return err
 	}
 	return c.AddToContextStore(fmt.Sprintf("%s.json", name), string(content))
+}
+
+func (c *Core) newContextFromAttached(ctx *ContextSettings) error {
+	content, err := json.Marshal(ctx)
+	if err != nil {
+		return err
+	}
+	return c.AddToContextStore(fmt.Sprintf("%s.json", ctx.Name), string(content))
 }
 
 func (c *Core) addData(filename string, content string) error {

@@ -51,6 +51,10 @@ func main() {
 			slog.Error("failed to load providers", "error", err)
 			os.Exit(1)
 		}
+		if err := core.LoadContexts(); err != nil {
+			slog.Error("failed to load contexts", "error", err)
+			os.Exit(1)
+		}
 	}
 	doRepl()
 }
@@ -179,6 +183,11 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 		fmt.Println("\t\\x: Toggle chat [toggle chat mode on/off - chat on by default press enter twice to send with no command leading]")
 		fmt.Println("\t\\a: List artifacts [display artifacts from current node] or [write artifacts to disk if followed by a directory path]")
 		fmt.Println("\t\\q: Quit [save and quit]")
+
+		// Added for convenience, so we don't have to exit the current chat to add a new context to the core
+		// When a context is added via a chat, it is automatically saved to disk and will be mandatory for the chat
+		// to be restored in the future.
+		fmt.Println("\t\\new-k: Attach new knowledge-context [attach a non-existing knowledge-context to the chat]")
 	case "\\l":
 		fmt.Println(panel.PrintHistory())
 	case "\\t":
@@ -246,6 +255,41 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 		fmt.Printf("chat enabled: %t\n", chatEnabled)
 	case "\\a":
 		return handleArtifacting(panel, parts)
+	case "\\new-k":
+		if len(parts) < 4 {
+			fmt.Println("usage: \\new-k <name> <type> <value>")
+			return false, nil
+		}
+		ctxName := parts[1]
+		ctxType := parts[2]
+		ctxValue := parts[3]
+
+		if ctxType != string(brunch.ContextTypeDirectory) &&
+			ctxType != string(brunch.ContextTypeDatabase) &&
+			ctxType != string(brunch.ContextTypeWeb) {
+			fmt.Println(
+				"invalid context type",
+				ctxType,
+				"must be one of:",
+				strings.Join([]string{
+					string(brunch.ContextTypeDirectory),
+					string(brunch.ContextTypeDatabase),
+					string(brunch.ContextTypeWeb),
+				}, ", "),
+			)
+			return false, nil
+		}
+
+		ctx := &brunch.ContextSettings{
+			Name:  ctxName,
+			Type:  brunch.ContextType(ctxType),
+			Value: ctxValue,
+		}
+		if err := panel.AttachContext(ctx); err != nil {
+			fmt.Println("failed to attach context", err)
+			return true, err
+		}
+		fmt.Println("attached context", ctxName, "to chat")
 	case "\\q":
 		fmt.Println("saving back to loaded snapshot")
 		if err := saveSnapshot(); err != nil {
