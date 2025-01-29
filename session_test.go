@@ -122,8 +122,8 @@ func TestSession_Execute(t *testing.T) {
 			},
 		},
 		{
-			name:    "new provider missing required property",
-			content: `\new-provider "test-provider" :host "test-host"`,
+			name:    "new_provider_missing_required_property",
+			content: `\new-provider "test-provider"`,
 			wantErr: true,
 		},
 		{
@@ -134,6 +134,206 @@ func TestSession_Execute(t *testing.T) {
 		{
 			name:    "chat missing name",
 			content: `\chat`,
+			wantErr: true,
+		},
+		{
+			name:    "new context command with no properties",
+			content: `\new-ctx "test-context"`,
+			validate: func(t *testing.T, called *bool, args []interface{}) {
+				if !*called {
+					t.Error("OnNewContext callback was not called")
+				}
+				if len(args) != 4 {
+					t.Errorf("expected 4 args, got %d", len(args))
+				}
+				name := args[0].(string)
+				name = strings.Trim(name, `"`)
+				if name != "test-context" {
+					t.Errorf("expected name 'test-context', got %s", name)
+				}
+				dir := args[1].(*string)
+				if dir != nil {
+					t.Error("expected nil dir")
+				}
+				database := args[2].(*string)
+				if database != nil {
+					t.Error("expected nil database")
+				}
+				web := args[3].(*string)
+				if web != nil {
+					t.Error("expected nil web")
+				}
+			},
+		},
+		{
+			name:    "new context command with all properties",
+			content: `\new-ctx "test-context" :dir "/test/dir" :database "test.db" :web "http://test.com"`,
+			validate: func(t *testing.T, called *bool, args []interface{}) {
+				if !*called {
+					t.Error("OnNewContext callback was not called")
+				}
+				if len(args) != 4 {
+					t.Errorf("expected 4 args, got %d", len(args))
+				}
+				name := args[0].(string)
+				name = strings.Trim(name, `"`)
+				if name != "test-context" {
+					t.Errorf("expected name 'test-context', got %s", name)
+				}
+				dir := args[1].(*string)
+				if dir == nil {
+					t.Error("expected non-nil dir")
+					return
+				}
+				dirVal := strings.Trim(*dir, `"`)
+				if dirVal != "/test/dir" {
+					t.Errorf("expected dir '/test/dir', got %s", dirVal)
+				}
+				database := args[2].(*string)
+				if database == nil {
+					t.Error("expected non-nil database")
+					return
+				}
+				dbVal := strings.Trim(*database, `"`)
+				if dbVal != "test.db" {
+					t.Errorf("expected database 'test.db', got %s", dbVal)
+				}
+				web := args[3].(*string)
+				if web == nil {
+					t.Error("expected non-nil web")
+					return
+				}
+				webVal := strings.Trim(*web, `"`)
+				if webVal != "http://test.com" {
+					t.Errorf("expected web 'http://test.com', got %s", webVal)
+				}
+			},
+		},
+		{
+			name:    "new context missing name",
+			content: `\new-ctx`,
+			wantErr: true,
+		},
+		{
+			name:    "delete chat command",
+			content: `\del-chat "test-chat"`,
+			validate: func(t *testing.T, called *bool, args []interface{}) {
+				if !*called {
+					t.Error("OnDeleteChat callback was not called")
+				}
+				if len(args) != 1 {
+					t.Errorf("expected 1 arg, got %d", len(args))
+				}
+				name := args[0].(string)
+				name = strings.Trim(name, `"`)
+				if name != "test-chat" {
+					t.Errorf("expected name 'test-chat', got %s", name)
+				}
+			},
+		},
+		{
+			name:    "delete chat missing name",
+			content: `\del-chat`,
+			wantErr: true,
+		},
+		{
+			name:    "delete context command",
+			content: `\del-ctx "test-context"`,
+			validate: func(t *testing.T, called *bool, args []interface{}) {
+				if !*called {
+					t.Error("OnDeleteContext callback was not called")
+				}
+				if len(args) != 1 {
+					t.Errorf("expected 1 arg, got %d", len(args))
+				}
+				name := args[0].(string)
+				name = strings.Trim(name, `"`)
+				if name != "test-context" {
+					t.Errorf("expected name 'test-context', got %s", name)
+				}
+			},
+		},
+		{
+			name:    "delete context missing name",
+			content: `\del-ctx`,
+			wantErr: true,
+		},
+		{
+			name:    "describe context command",
+			content: `\desc-ctx "test-context"`,
+			validate: func(t *testing.T, called *bool, args []interface{}) {
+				if !*called {
+					t.Error("OnDescribeContext callback was not called")
+				}
+				if len(args) != 1 {
+					t.Errorf("expected 1 arg, got %d", len(args))
+				}
+				name := args[0].(string)
+				name = strings.Trim(name, `"`)
+				if name != "test-context" {
+					t.Errorf("expected name 'test-context', got %s", name)
+				}
+			},
+		},
+		{
+			name:    "describe context missing name",
+			content: `\desc-ctx`,
+			wantErr: true,
+		},
+		{
+			name:    "describe chat command",
+			content: `\desc-chat "test-chat"`,
+			validate: func(t *testing.T, called *bool, args []interface{}) {
+				if !*called {
+					t.Error("OnDescribeChat callback was not called")
+				}
+				if len(args) != 1 {
+					t.Errorf("expected 1 arg, got %d", len(args))
+				}
+				name := args[0].(string)
+				name = strings.Trim(name, `"`)
+				if name != "test-chat" {
+					t.Errorf("expected name 'test-chat', got %s", name)
+				}
+			},
+		},
+		{
+			name:    "describe chat missing name",
+			content: `\desc-chat`,
+			wantErr: true,
+		},
+		{
+			name:    "list provider command",
+			content: `\list-provider`,
+			validate: func(t *testing.T, called *bool, args []interface{}) {
+				if !*called {
+					t.Error("OnListProviders callback was not called")
+				}
+				if len(args) != 0 {
+					t.Errorf("expected 0 args, got %d", len(args))
+				}
+			},
+		},
+		{
+			name:    "delete provider command",
+			content: `\del-provider "test-provider"`,
+			validate: func(t *testing.T, called *bool, args []interface{}) {
+				if !*called {
+					t.Error("OnDeleteProvider callback was not called")
+				}
+				if len(args) != 1 {
+					t.Errorf("expected 1 arg, got %d", len(args))
+				}
+				name := args[0].(string)
+				name = strings.Trim(name, `"`)
+				if name != "test-provider" {
+					t.Errorf("expected name 'test-provider', got %s", name)
+				}
+			},
+		},
+		{
+			name:    "delete provider missing name",
+			content: `\del-provider`,
 			wantErr: true,
 		},
 	}
@@ -154,10 +354,17 @@ func TestSession_Execute(t *testing.T) {
 
 			// Track callback calls
 			var (
-				newProviderCalled bool
-				newChatCalled     bool
-				loadChatCalled    bool
-				callbackArgs      []interface{}
+				newProviderCalled     bool
+				newChatCalled         bool
+				loadChatCalled        bool
+				newContextCalled      bool
+				deleteChatCalled      bool
+				deleteContextCalled   bool
+				describeContextCalled bool
+				describeChatCalled    bool
+				listProvidersCalled   bool
+				deleteProviderCalled  bool
+				callbackArgs          []interface{}
 			)
 
 			callbacks := OperationalCallback{
@@ -174,6 +381,41 @@ func TestSession_Execute(t *testing.T) {
 				OnLoadChat: func(name string, hash *string) error {
 					loadChatCalled = true
 					callbackArgs = []interface{}{name, hash}
+					return nil
+				},
+				OnNewContext: func(name string, dir, database, web *string) error {
+					newContextCalled = true
+					callbackArgs = []interface{}{name, dir, database, web}
+					return nil
+				},
+				OnDeleteChat: func(name string) error {
+					deleteChatCalled = true
+					callbackArgs = []interface{}{name}
+					return nil
+				},
+				OnDeleteContext: func(name string) error {
+					deleteContextCalled = true
+					callbackArgs = []interface{}{name}
+					return nil
+				},
+				OnDescribeContext: func(name string) error {
+					describeContextCalled = true
+					callbackArgs = []interface{}{name}
+					return nil
+				},
+				OnDescribeChat: func(name string) error {
+					describeChatCalled = true
+					callbackArgs = []interface{}{name}
+					return nil
+				},
+				OnListProviders: func() error {
+					listProvidersCalled = true
+					callbackArgs = []interface{}{}
+					return nil
+				},
+				OnDeleteProvider: func(name string) error {
+					deleteProviderCalled = true
+					callbackArgs = []interface{}{name}
 					return nil
 				},
 			}
@@ -200,6 +442,20 @@ func TestSession_Execute(t *testing.T) {
 				called = &newChatCalled
 			case "chat":
 				called = &loadChatCalled
+			case "new-ctx":
+				called = &newContextCalled
+			case "del-chat":
+				called = &deleteChatCalled
+			case "del-ctx":
+				called = &deleteContextCalled
+			case "desc-ctx":
+				called = &describeContextCalled
+			case "desc-chat":
+				called = &describeChatCalled
+			case "list-provider":
+				called = &listProvidersCalled
+			case "del-provider":
+				called = &deleteProviderCalled
 			}
 
 			// Validate callback and args

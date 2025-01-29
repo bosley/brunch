@@ -36,6 +36,13 @@ Here is an overview of the initial statement options that help define chats and 
    - Interacts with an existing chat
    - Optional properties:
      - `:hash` (string) [loads a specified hash, defaults to latest]
+
+4. `\new-ctx "name"`
+   - Creates a new context for knowledge/data access
+   - Optional properties (at least one required):
+     - `:dir` (string) [directory path for file access]
+     - `:database` (string) [database connection string]
+     - `:web` (string) [web endpoint]
 ```
 
 Example of the creating a chat, and using the chat REPL:
@@ -77,6 +84,8 @@ Commands:
         \x: Toggle chat [toggle chat mode on/off - chat on by default press enter twice to send with no command leading]
         \a: List artifacts [display artifacts from current node] or [write artifacts to disk if followed by a directory path]
         \q: Quit [save and quit]
+        \new-k: Attach new knowledge-context [attach a non-existing knowledge-context to the chat]
+        \attach-k: Attach existing knowledge-context [attach an existing knowledge-context to the chat]
 ```
 
 Image analysis:

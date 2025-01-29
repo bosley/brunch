@@ -1,3 +1,13 @@
+/*
+This is the CLI application being made to construct the brunch core and statement system.
+This cli adds a secondary REPL to interact with the chats via the conversation interface
+in the core.
+
+This is mostly the POC application for the core and statement system, and once we get a
+somewhat stable core/statement/storage/exec system I intend to create a fuego-based server
+to interact with the system.
+*/
+
 package main
 
 import (
@@ -9,6 +19,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bosley/brunch"
 	"github.com/bosley/brunch/anthropic"
@@ -18,8 +29,17 @@ var loadDir *string
 var chatEnabled bool
 var core *brunch.Core
 var logger *slog.Logger
+var busy bool
 
 const sessionId = "cli-session"
+
+var infoCb = brunch.InformationCallback{
+	OnListChats:       infoCbListChats,
+	OnListProviders:   infoCbListProviders,
+	OnListContexts:    infoCbListContexts,
+	OnDescribeContext: infoCbDescribeContext,
+	OnDescribeChat:    infoCbDescribeChat,
+}
 
 func main() {
 	logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -37,6 +57,16 @@ func main() {
 		BaseProviders: map[string]brunch.Provider{
 			"anthropic": anthropic.InitialAnthropicProvider(),
 		},
+
+		InfoHandler: infoCb,
+		ChatStartHandler: func(req brunch.Conversation) error {
+
+			// I know this is hacky, but this is a POC and we are tossing the CLI once we start on the server so fuck off
+			busy = true
+			defer func() { busy = false }()
+			doChat(req)
+			return nil
+		},
 	})
 
 	if !core.IsInstalled() {
@@ -49,6 +79,10 @@ func main() {
 		slog.Info("core already installed, loading providers", "dir", *loadDir)
 		if err := core.LoadProviders(); err != nil {
 			slog.Error("failed to load providers", "error", err)
+			os.Exit(1)
+		}
+		if err := core.LoadContexts(); err != nil {
+			slog.Error("failed to load contexts", "error", err)
 			os.Exit(1)
 		}
 	}
@@ -84,23 +118,20 @@ func doRepl() {
 			continue
 		}
 
-		req := core.ExecuteStatement(sessionId, stmt)
-		if req.Error != nil {
-			fmt.Printf("Error: %v\n", req.Error)
+		if err := core.ExecuteStatement(sessionId, stmt); err != nil {
+			fmt.Printf("Error: %v\n", err)
 			continue
 		}
 
-		// If the statement yields anything other than an error, it's a chat request
-		// as all other commands are handled by the core
-		if req.ChatRequest != nil {
-			doChat(req.ChatRequest.LoadedInstance)
+		for busy {
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
 
 // Perform the actual chat with the person. This will eventually be diffused into a server
 // that could be repld if I decide to make this a web app.
-func doChat(chat *brunch.ChatInstance) {
+func doChat(chat brunch.Conversation) {
 
 	banner()
 
@@ -162,7 +193,7 @@ func doChat(chat *brunch.ChatInstance) {
 	}
 }
 
-func handleCommand(panel brunch.Panel, line string) (bool, error) {
+func handleCommand(conversation brunch.Conversation, line string) (bool, error) {
 	parts := strings.Split(line, " ")
 	switch parts[0] {
 	case "\\?":
@@ -179,22 +210,28 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 		fmt.Println("\t\\x: Toggle chat [toggle chat mode on/off - chat on by default press enter twice to send with no command leading]")
 		fmt.Println("\t\\a: List artifacts [display artifacts from current node] or [write artifacts to disk if followed by a directory path]")
 		fmt.Println("\t\\q: Quit [save and quit]")
+
+		// Added for convenience, so we don't have to exit the current chat to add a new context to the core
+		// When a context is added via a chat, it is automatically saved to disk and will be mandatory for the chat
+		// to be restored in the future.
+		fmt.Println("\t\\new-k: Attach new knowledge-context [attach a non-existing knowledge-context to the chat]")
+		fmt.Println("\t\\attach-k: Attach existing knowledge-context [attach an existing knowledge-context to the chat]")
 	case "\\l":
-		fmt.Println(panel.PrintHistory())
+		fmt.Println(conversation.PrintHistory())
 	case "\\t":
-		fmt.Println(panel.PrintTree())
+		fmt.Println(conversation.PrintTree())
 	case "\\i":
 		fmt.Println("Enter image path:")
 		var imagePath string
 		fmt.Scanln(&imagePath)
-		if err := panel.QueueImages([]string{imagePath}); err != nil {
+		if err := conversation.QueueImages([]string{imagePath}); err != nil {
 			fmt.Println("Failed to queue image:", err)
 			return true, err
 		}
 	case "\\s":
 		saveSnapshot()
 	case "\\p":
-		if err := panel.Parent(); err != nil {
+		if err := conversation.Parent(); err != nil {
 			fmt.Println("failed to go to parent", err)
 			return true, err
 		}
@@ -208,12 +245,12 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 			fmt.Println("failed to parse index", err)
 			return true, err
 		}
-		if err := panel.Child(idx); err != nil {
+		if err := conversation.Child(idx); err != nil {
 			fmt.Println("failed to go to child", err)
 			return true, err
 		}
 	case "\\r":
-		if err := panel.Root(); err != nil {
+		if err := conversation.Root(); err != nil {
 			fmt.Println("failed to go to root", err)
 			return true, err
 		}
@@ -222,15 +259,15 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 			fmt.Println("usage: \\g <node_hash>")
 			return false, nil
 		}
-		if err := panel.Goto(parts[1]); err != nil {
+		if err := conversation.Goto(parts[1]); err != nil {
 			fmt.Println("failed to go to node", err)
 			return true, err
 		}
 	case "\\.":
-		if panel.HasParent() {
+		if conversation.HasParent() {
 			fmt.Println("current node has parent; use \\p to access")
 		}
-		children := panel.ListChildren()
+		children := conversation.ListChildren()
 		if len(children) == 0 {
 			fmt.Println("current node has no children")
 			return false, nil
@@ -242,10 +279,67 @@ func handleCommand(panel brunch.Panel, line string) (bool, error) {
 		fmt.Println("\nuse \\c <idx> to go to child")
 	case "\\x":
 		chatEnabled = !chatEnabled
-		panel.ToggleChat(chatEnabled)
+		conversation.ToggleChat(chatEnabled)
 		fmt.Printf("chat enabled: %t\n", chatEnabled)
 	case "\\a":
-		return handleArtifacting(panel, parts)
+		return handleArtifacting(conversation, parts)
+	case "\\new-k":
+		if len(parts) < 4 {
+			fmt.Println("usage: \\new-k <name> <type> <value>")
+			return false, nil
+		}
+		ctxName := parts[1]
+		ctxType := parts[2]
+		ctxValue := parts[3]
+
+		if ctxType != string(brunch.ContextTypeDirectory) &&
+			ctxType != string(brunch.ContextTypeDatabase) &&
+			ctxType != string(brunch.ContextTypeWeb) {
+			fmt.Println(
+				"invalid context type",
+				ctxType,
+				"must be one of:",
+				strings.Join([]string{
+					string(brunch.ContextTypeDirectory),
+					string(brunch.ContextTypeDatabase),
+					string(brunch.ContextTypeWeb),
+				}, ", "),
+			)
+			return false, nil
+		}
+
+		ctx := &brunch.ContextSettings{
+			Name:  ctxName,
+			Type:  brunch.ContextType(ctxType),
+			Value: ctxValue,
+		}
+		if err := conversation.CreateContext(ctx); err != nil {
+			fmt.Println("failed to attach context", err)
+			return true, err
+		}
+		fmt.Println("attached context", ctxName, "to chat")
+
+	case "\\attach-k":
+		if len(parts) < 2 {
+			fmt.Println("usage: \\attach-k <name>")
+			return false, nil
+		}
+		ctxName := parts[1]
+		if err := conversation.AttachContext(ctxName); err != nil {
+			fmt.Println("failed to attach context", err)
+			return true, err
+		}
+		fmt.Println("attached context", ctxName, "to chat")
+	case "\\available-k":
+		fmt.Print("Available Knowledge Contexts:\n\n")
+		for _, ctx := range core.ListContexts() {
+			fmt.Printf("\t%s\n", ctx)
+		}
+	case "\\active-k":
+		fmt.Print("Active Knowledge Contexts:\n\n")
+		for _, ctx := range conversation.ListKnowledgeContexts() {
+			fmt.Printf("\t%s\n", ctx)
+		}
 	case "\\q":
 		fmt.Println("saving back to loaded snapshot")
 		if err := saveSnapshot(); err != nil {
@@ -289,9 +383,9 @@ func isNonReplQuit(line string) bool {
 	return false
 }
 
-func handleArtifacting(panel brunch.Panel, parts []string) (bool, error) {
+func handleArtifacting(conversation brunch.Conversation, parts []string) (bool, error) {
 
-	artifacts := panel.Artifacts()
+	artifacts := conversation.Artifacts()
 	if len(artifacts) == 0 {
 		fmt.Println("No artifacts in current node")
 		return false, nil
@@ -368,4 +462,35 @@ func handleArtifacting(panel brunch.Panel, parts []string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func infoCbListChats(chats []string) {
+	fmt.Println("Chats:")
+	for _, chat := range chats {
+		fmt.Println("\t", chat)
+	}
+}
+
+func infoCbListProviders(providers []string) {
+	fmt.Println("Providers:")
+	for _, provider := range providers {
+		fmt.Println("\t", provider)
+	}
+}
+
+func infoCbListContexts(contexts []string) {
+	fmt.Println("Contexts:")
+	for _, context := range contexts {
+		fmt.Println("\t", context)
+	}
+}
+
+func infoCbDescribeContext(data string) {
+	fmt.Println("Context:")
+	fmt.Println("\t", data)
+}
+
+func infoCbDescribeChat(data string) {
+	fmt.Println("Chat:")
+	fmt.Println("\t", data)
 }

@@ -16,6 +16,7 @@ import (
 
 const (
 	dataStoreDirectory     = "data-store"
+	contextStoreDirectory  = "context-store"
 	chatStoreDirectory     = "chat-store"
 	providerStoreDirectory = "provider-store"
 )
@@ -31,30 +32,38 @@ type Core struct {
 	sessions map[string]*coreSession
 	sesMu    sync.Mutex
 
-	activeChats map[string]*ChatInstance
+	activeChats map[string]*chatInstance
 	chatMu      sync.Mutex
 
 	baseProviders map[string]Provider
+
+	contexts map[string]*ContextSettings
+	ctxMu    sync.Mutex
+
+	chatStartHandler CoreChatStartHandler
+	infoHandler      InformationCallback
 }
 
 type CoreOpts struct {
 	InstallDirectory string
 	BaseProviders    map[string]Provider
+	ChatStartHandler CoreChatStartHandler
+	InfoHandler      InformationCallback
 }
 
-// The core handles the execution, and management-of chats and their related
-// providers, data, etc. However, the core is NOT the chat instance itself.
-// If a statement requests and audiance with an llm, the core chat request
-// will be handed back in the CoreStmtExecResult following the ExecuteStatement
-// call that requested it.
-type CoreChatRequest struct {
-	LoadedInstance *ChatInstance
+type CoreInfo struct {
+	Chats     []string
+	Providers []string
+	Contexts  []string
 }
 
-type CoreStmtExecResult struct {
-	Error       error
-	ChatRequest *CoreChatRequest // This will be set iff \chat was called
+type CoreDescription struct {
+	Chats     []string
+	Providers []string
+	Contexts  []string
 }
+
+type CoreChatStartHandler func(req Conversation) error
 
 // Create a new core instance with a set of
 // providers that can be selected from. We are attempting to be
@@ -67,12 +76,15 @@ func NewCore(opts CoreOpts) *Core {
 		installDirectory: opts.InstallDirectory,
 		providers:        opts.BaseProviders,
 		sessions:         make(map[string]*coreSession),
-		activeChats:      make(map[string]*ChatInstance),
+		activeChats:      make(map[string]*chatInstance),
 		baseProviders:    opts.BaseProviders,
+		contexts:         make(map[string]*ContextSettings),
+		chatStartHandler: opts.ChatStartHandler,
+		infoHandler:      opts.InfoHandler,
 	}
 }
 
-func (c *Core) GetActiveChat(name string) (*ChatInstance, error) {
+func (c *Core) GetActiveChat(name string) (*chatInstance, error) {
 	c.chatMu.Lock()
 	defer c.chatMu.Unlock()
 	chat, ok := c.activeChats[name]
@@ -102,6 +114,7 @@ func (c *Core) Install() error {
 		filepath.Join(c.installDirectory, dataStoreDirectory),
 		filepath.Join(c.installDirectory, chatStoreDirectory),
 		filepath.Join(c.installDirectory, providerStoreDirectory),
+		filepath.Join(c.installDirectory, contextStoreDirectory),
 	}
 
 	for _, dir := range dirs {
@@ -144,15 +157,15 @@ func (c *Core) EndSession(sessionId string) error {
 	return nil
 }
 
-func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) CoreStmtExecResult {
+func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) error {
 
 	if stmt == nil {
-		return CoreStmtExecResult{Error: errors.New("statement is required")}
+		return errors.New("statement is required")
 	}
 
 	sanitized := strings.TrimSpace(sessionId)
 	if sanitized == "" {
-		return CoreStmtExecResult{Error: errors.New("session id is required")}
+		return errors.New("session id is required")
 	}
 	sessionId = sanitized
 
@@ -171,30 +184,66 @@ func (c *Core) ExecuteStatement(sessionId string, stmt *Statement) CoreStmtExecR
 		c.sesMu.Unlock()
 	}
 
-	var cr *CoreChatRequest
 	callbacks := OperationalCallback{
-		OnNewChat:     c.NewChat,
-		OnNewProvider: c.newProviderFromStatement,
+		OnNewChat:        c.NewChat,
+		OnNewProvider:    c.newProviderFromStatement,
+		OnNewContext:     c.newContext,
+		OnDeleteProvider: c.onDeleteProvider,
+		OnDeleteChat:     c.deleteChat,
+		OnDeleteContext:  c.deleteContext,
+
 		OnLoadChat: func(name string, hash *string) error {
 			ci, err := c.loadChat(name, hash)
 			if err != nil {
 				return err
 			}
-			cr = &CoreChatRequest{
-				LoadedInstance: ci,
-			}
-
-			// Set the chat name in the session so we can track it from the user (who knows how many chats theyll have so we tie per-session)
 			session.activeChatId = name
+			return c.chatStartHandler(ci)
+		},
+
+		OnListChats: func() error {
+			data, err := c.onListChats()
+			if err != nil {
+				return err
+			}
+			c.infoHandler.OnListChats(data)
+			return nil
+		},
+		OnListContexts: func() error {
+			data, err := c.onListContexts()
+			if err != nil {
+				return err
+			}
+			c.infoHandler.OnListContexts(data)
+			return nil
+		},
+		OnDescribeContext: func(name string) error {
+			data, err := c.onDescribeContext(name)
+			if err != nil {
+				return err
+			}
+			c.infoHandler.OnDescribeContext(data)
+			return nil
+		},
+		OnDescribeChat: func(name string) error {
+			c.infoHandler.OnDescribeChat(name)
+			return nil
+		},
+		OnListProviders: func() error {
+			data, err := c.onListProviders()
+			if err != nil {
+				return err
+			}
+			c.infoHandler.OnListProviders(data)
 			return nil
 		},
 	}
 
 	err := session.execute(stmt, callbacks)
 	if err != nil {
-		return CoreStmtExecResult{Error: err}
+		return err
 	}
-	return CoreStmtExecResult{ChatRequest: cr}
+	return nil
 }
 
 // When the statement execution is done, the user may have executed a statement to create a new provider
@@ -304,10 +353,37 @@ func (c *Core) LoadProviders() error {
 	return nil
 }
 
+func (c *Core) LoadContexts() error {
+	dataStoreDir := filepath.Join(c.installDirectory, contextStoreDirectory)
+	files, err := os.ReadDir(dataStoreDir)
+	if err != nil {
+		return fmt.Errorf("failed to read context store directory: %w", err)
+	}
+
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+
+		content, err := c.loadFromStore(contextStoreDirectory, file.Name())
+		if err != nil {
+			return fmt.Errorf("failed to load context file %s: %w", file.Name(), err)
+		}
+
+		var ctx ContextSettings
+		if err := json.Unmarshal([]byte(content), &ctx); err != nil {
+			return fmt.Errorf("failed to unmarshal context settings from %s: %w", file.Name(), err)
+		}
+
+		c.contexts[ctx.Name] = &ctx
+	}
+	return nil
+}
+
 // This creates a chat instance, but it does not load it. It defines it so that the user can
 // load it later (think of it like making a db table)
 func (c *Core) NewChat(name string, providerName string) error {
-	var chat *ChatInstance
+	var chat *chatInstance
 	{
 		c.provMu.Lock()
 		defer c.provMu.Unlock()
@@ -325,7 +401,7 @@ func (c *Core) NewChat(name string, providerName string) error {
 		chatSettings.Name = name
 		chatSettings.Host = providerName
 		cloned := provider.CloneWithSettings(chatSettings)
-		chat = NewChatInstance(cloned)
+		chat = newChatInstance(cloned)
 	}
 
 	return c.writeSnapshot(name, chat)
@@ -333,7 +409,7 @@ func (c *Core) NewChat(name string, providerName string) error {
 
 func (c *Core) SaveActiveChat(sessionName string) error {
 	var target string
-	var chat *ChatInstance
+	var chat *chatInstance
 	{
 		c.sesMu.Lock()
 		session, exists := c.sessions[sessionName]
@@ -356,7 +432,7 @@ func (c *Core) SaveActiveChat(sessionName string) error {
 	return c.writeSnapshot(target, chat)
 }
 
-func (c *Core) writeSnapshot(ssName string, chat *ChatInstance) error {
+func (c *Core) writeSnapshot(ssName string, chat *chatInstance) error {
 	ss, err := chat.Snapshot()
 	if err != nil {
 		return err
@@ -371,7 +447,7 @@ func (c *Core) writeSnapshot(ssName string, chat *ChatInstance) error {
 	return nil
 }
 
-func (c *Core) loadChat(name string, hash *string) (*ChatInstance, error) {
+func (c *Core) loadChat(name string, hash *string) (*chatInstance, error) {
 	{
 		c.chatMu.Lock()
 		chat, exists := c.activeChats[name]
@@ -395,7 +471,7 @@ func (c *Core) loadChat(name string, hash *string) (*ChatInstance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal chat snapshot: %w", err)
 	}
-	chat, err := NewChatInstanceFromSnapshot(c.providers, &snapshot)
+	chat, err := newChatInstanceFromSnapshot(c, &snapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -412,6 +488,49 @@ func (c *Core) loadChat(name string, hash *string) (*ChatInstance, error) {
 		c.chatMu.Unlock()
 	}
 	return chat, nil
+}
+
+func (c *Core) newContext(name string, dir *string, database *string, web *string) error {
+	ctx := ContextSettings{
+		Name: name,
+	}
+	if dir != nil {
+		ctx.Type = ContextTypeDirectory
+		ctx.Value = *dir
+	} else if database != nil {
+		ctx.Type = ContextTypeDatabase
+		ctx.Value = *database
+	} else if web != nil {
+		ctx.Type = ContextTypeWeb
+		ctx.Value = *web
+	}
+	content, err := json.Marshal(ctx)
+	if err != nil {
+		return err
+	}
+
+	c.ctxMu.Lock()
+	if _, exists := c.contexts[name]; exists {
+		c.ctxMu.Unlock()
+		return fmt.Errorf("context %s already exists", name)
+	}
+
+	if err := c.AddToContextStore(fmt.Sprintf("%s.json", name), string(content)); err != nil {
+		c.ctxMu.Unlock()
+		return err
+	}
+
+	c.contexts[name] = &ctx
+	c.ctxMu.Unlock()
+	return nil
+}
+
+func (c *Core) newContextFromAttached(ctx *ContextSettings) error {
+	content, err := json.Marshal(ctx)
+	if err != nil {
+		return err
+	}
+	return c.AddToContextStore(fmt.Sprintf("%s.json", ctx.Name), string(content))
 }
 
 func (c *Core) addData(filename string, content string) error {
@@ -444,4 +563,300 @@ func (c *Core) LoadFromDataStore(filename string) (string, error) {
 
 func (c *Core) LoadFromChatStore(filename string) (string, error) {
 	return c.loadFromStore(chatStoreDirectory, filename)
+}
+
+func (c *Core) LoadFromContextStore(filename string) (string, error) {
+	return c.loadFromStore(contextStoreDirectory, filename)
+}
+
+func (c *Core) AddToContextStore(filename string, content string) error {
+	return c.addData(filepath.Join(c.installDirectory, contextStoreDirectory, filename), content)
+}
+
+// isContextInUse checks if a context is being used by any chat by scanning all chat files
+func (c *Core) isContextInUse(contextName string) (bool, error) {
+	chatStoreDir := filepath.Join(c.installDirectory, chatStoreDirectory)
+	files, err := os.ReadDir(chatStoreDir)
+	if err != nil {
+		return false, fmt.Errorf("failed to read chat store directory: %w", err)
+	}
+
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+
+		content, err := c.LoadFromChatStore(file.Name())
+		if err != nil {
+			return false, fmt.Errorf("failed to load chat file %s: %w", file.Name(), err)
+		}
+
+		var snapshot Snapshot
+		if err := json.Unmarshal([]byte(content), &snapshot); err != nil {
+			return false, fmt.Errorf("failed to unmarshal chat snapshot from %s: %w", file.Name(), err)
+		}
+
+		// Check if this chat uses the context
+		for _, ctx := range snapshot.Contexts {
+			if ctx == contextName {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
+}
+
+func (c *Core) deleteChat(name string) error {
+	// First check if the chat is active in any session
+	c.sesMu.Lock()
+	for _, session := range c.sessions {
+		if session.activeChatId == name {
+			c.sesMu.Unlock()
+			return fmt.Errorf("cannot delete chat %s: it is currently active in a session", name)
+		}
+	}
+	c.sesMu.Unlock()
+
+	// Check if it's in active chats
+	c.chatMu.Lock()
+	if _, exists := c.activeChats[name]; exists {
+		c.chatMu.Unlock()
+		return fmt.Errorf("cannot delete chat %s: it is currently active", name)
+	}
+	c.chatMu.Unlock()
+
+	// Delete the chat file
+	chatFile := fmt.Sprintf("%s.json", name)
+	if !strings.HasSuffix(name, ".json") {
+		chatFile = fmt.Sprintf("%s.json", name)
+	}
+
+	err := os.Remove(filepath.Join(c.installDirectory, chatStoreDirectory, chatFile))
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete chat file: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Core) deleteContext(name string) error {
+	// First check if the context exists
+	c.ctxMu.Lock()
+	_, exists := c.contexts[name]
+	if !exists {
+		c.ctxMu.Unlock()
+		return fmt.Errorf("context %s does not exist", name)
+	}
+	c.ctxMu.Unlock()
+
+	// Check if the context is in use by any chat
+	inUse, err := c.isContextInUse(name)
+	if err != nil {
+		return fmt.Errorf("failed to check if context is in use: %w", err)
+	}
+	if inUse {
+		return fmt.Errorf("cannot delete context %s: it is currently in use by one or more chats", name)
+	}
+
+	// Remove from memory
+	c.ctxMu.Lock()
+	delete(c.contexts, name)
+	c.ctxMu.Unlock()
+
+	// Delete the context file
+	contextFile := fmt.Sprintf("%s.json", name)
+	if !strings.HasSuffix(name, ".json") {
+		contextFile = fmt.Sprintf("%s.json", name)
+	}
+
+	err = os.Remove(filepath.Join(c.installDirectory, contextStoreDirectory, contextFile))
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete context file: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Core) getStorageJsons(store string) ([]string, error) {
+	storeDir := filepath.Join(c.installDirectory, store)
+	files, err := os.ReadDir(storeDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s store directory: %w", store, err)
+	}
+
+	jsons := []string{}
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+		jsons = append(jsons, file.Name())
+	}
+
+	return jsons, nil
+}
+
+func (c *Core) onDeleteProvider(name string) error {
+	// First check if the provider exists
+	c.provMu.Lock()
+	_, exists := c.providers[name]
+	if !exists {
+		c.provMu.Unlock()
+		return fmt.Errorf("provider %s does not exist", name)
+	}
+
+	// Check if it's a base provider
+	if _, isBase := c.baseProviders[name]; isBase {
+		c.provMu.Unlock()
+		return fmt.Errorf("cannot delete base provider %s", name)
+	}
+
+	// Check if any chats are using this provider
+	inUse := false
+	chatStoreDir := filepath.Join(c.installDirectory, chatStoreDirectory)
+	files, err := os.ReadDir(chatStoreDir)
+	if err != nil {
+		c.provMu.Unlock()
+		return fmt.Errorf("failed to read chat store directory: %w", err)
+	}
+
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+
+		content, err := c.LoadFromChatStore(file.Name())
+		if err != nil {
+			c.provMu.Unlock()
+			return fmt.Errorf("failed to load chat file %s: %w", file.Name(), err)
+		}
+
+		var snapshot Snapshot
+		if err := json.Unmarshal([]byte(content), &snapshot); err != nil {
+			c.provMu.Unlock()
+			return fmt.Errorf("failed to unmarshal chat snapshot from %s: %w", file.Name(), err)
+		}
+
+		if snapshot.ProviderName == name {
+			inUse = true
+			break
+		}
+	}
+
+	if inUse {
+		c.provMu.Unlock()
+		return fmt.Errorf("cannot delete provider %s: it is currently in use by one or more chats", name)
+	}
+
+	// Remove from memory
+	delete(c.providers, name)
+	c.provMu.Unlock()
+
+	// Delete the provider file
+	providerFile := fmt.Sprintf("%s.json", name)
+	if !strings.HasSuffix(name, ".json") {
+		providerFile = fmt.Sprintf("%s.json", name)
+	}
+
+	err = os.Remove(filepath.Join(c.installDirectory, providerStoreDirectory, providerFile))
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete provider file: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Core) ListContexts() []string {
+	c.ctxMu.Lock()
+	defer c.ctxMu.Unlock()
+	ctxs := make([]string, 0, len(c.contexts))
+	for name := range c.contexts {
+		ctxs = append(ctxs, name)
+	}
+	return ctxs
+}
+
+func (c *Core) onListChats() ([]string, error) {
+	jsons, err := c.getStorageJsons(chatStoreDirectory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chat store jsons: %w", err)
+	}
+
+	chats := []string{}
+	for _, json := range jsons {
+		name := strings.TrimSuffix(json, ".json")
+		chats = append(chats, name)
+	}
+	return chats, nil
+}
+
+func (c *Core) onListContexts() ([]string, error) {
+	jsons, err := c.getStorageJsons(contextStoreDirectory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get context store jsons: %w", err)
+	}
+
+	ctxs := []string{}
+	for _, json := range jsons {
+		name := strings.TrimSuffix(json, ".json")
+		ctxs = append(ctxs, name)
+	}
+	return ctxs, nil
+}
+
+func (c *Core) onDescribeContext(name string) (string, error) {
+
+	if !strings.HasSuffix(name, ".json") {
+		name = fmt.Sprintf("%s.json", name)
+	}
+
+	content, err := c.LoadFromContextStore(name)
+	if err != nil {
+		return "", fmt.Errorf("failed to load context from disk: %w", err)
+	}
+	return content, nil
+}
+
+func (c *Core) onDescribeChat(name string) (string, error) {
+	chat, err := c.loadChat(name, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to load chat from disk: %w", err)
+	}
+
+	desc := fmt.Sprintf("%-15s %s\n", "Name:", name)
+	desc += fmt.Sprintf("%-15s %s\n", "Provider:", chat.provider.Settings().Name)
+	desc += fmt.Sprintf("%-15s %s\n", "Base URL:", chat.provider.Settings().BaseUrl)
+	desc += fmt.Sprintf("%-15s %d\n", "Max Tokens:", chat.provider.Settings().MaxTokens)
+	desc += fmt.Sprintf("%-15s %.2f\n", "Temperature:", chat.provider.Settings().Temperature)
+	desc += fmt.Sprintf("%-15s %s\n", "System Prompt:", chat.provider.Settings().SystemPrompt)
+	desc += fmt.Sprintf("%-15s %d\n", "Contexts:", len(chat.contexts))
+	for _, ctx := range chat.contexts {
+		desc += fmt.Sprintf("%-15s %s\n", "", ctx.Name)
+	}
+	desc += fmt.Sprintf("%-15s %s\n", "Active Hash:", chat.currentNode.Hash())
+	return desc, nil
+}
+
+func (c *Core) onListProviders() ([]string, error) {
+	c.provMu.Lock()
+	defer c.provMu.Unlock()
+
+	jsons, err := c.getStorageJsons(providerStoreDirectory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get provider store jsons: %w", err)
+	}
+
+	providers := []string{}
+	providers = append(providers, fmt.Sprintf("Base Providers (immutable): %d", len(c.baseProviders)))
+	for _, prov := range c.baseProviders {
+		providers = append(providers, fmt.Sprintf("\t%s", prov.Settings().Name))
+	}
+
+	providers = append(providers, "\n\nDerived Providers:")
+	for _, json := range jsons {
+		name := strings.TrimSuffix(json, ".json")
+		providers = append(providers, fmt.Sprintf("\t%s", name))
+	}
+
+	return providers, nil
 }

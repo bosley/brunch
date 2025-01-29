@@ -1,10 +1,3 @@
-/*
-	A session isn't a chat session, rather, its a command execution session. Its the context in which
-	all of the commands are executed from given statements.
-	These sessions setup and configure chats/providers with the core for interaction with the user
-	It can be thought of as a "workspace" for a singular, or series-of, chat session(s).
-*/
-
 package brunch
 
 import (
@@ -13,10 +6,38 @@ import (
 	"strconv"
 )
 
+// An operational callback is used when a session with a user (pre-chat interface) is in process.
+// When they submit a commmand via the core, it will use these callbacks to receive instructions
+// based on the command when `execucte` is called (below)
 type OperationalCallback struct {
-	OnLoadChat    func(name string, hash *string) error
-	OnNewChat     func(name string, provider string) error
-	OnNewProvider func(name string, host string, baseUrl string, maxTokens int, temperature float64, systemPrompt string) error
+	OnLoadChat       func(name string, hash *string) error
+	OnNewChat        func(name string, provider string) error
+	OnNewProvider    func(name string, host string, baseUrl string, maxTokens int, temperature float64, systemPrompt string) error
+	OnNewContext     func(name string, dir *string, database *string, web *string) error
+	OnDeleteChat     func(name string) error
+	OnDeleteContext  func(name string) error
+	OnDeleteProvider func(name string) error
+
+	// These operational callbacks may be user to get information and forward to the InformationCallback,
+	// BUT not NECESARILY. The InformationCallback is offered as a means to pipe informational data to a user
+	// regardless of their connection to the server. However its not mandatory for the implementation to do so
+	OnListChats       func() error
+	OnListProviders   func() error
+	OnListContexts    func() error
+	OnDescribeContext func(name string) error
+	OnDescribeChat    func(name string) error
+}
+
+// Informational callbacks are given to the core so that the user of the core can
+// institute the display of information requested from a query regardless if the implementation
+// is one of a CLI app, server, etc. This way the "backend" doesn't make any assumptions
+// about how the hell the information is supposed to get out
+type InformationCallback struct {
+	OnListChats       func(chats []string)
+	OnListProviders   func(providers []string)
+	OnListContexts    func(contexts []string)
+	OnDescribeContext func(data string)
+	OnDescribeChat    func(data string)
 }
 
 type coreSession struct {
@@ -24,7 +45,7 @@ type coreSession struct {
 	activeChatId string
 }
 
-// Send a statement to the session
+// Send a statement to the session (called by the core)
 func (s *coreSession) execute(stmt *Statement, callbacks OperationalCallback) error {
 
 	if !stmt.IsPrepared() {
@@ -50,6 +71,24 @@ func (s *coreSession) execute(stmt *Statement, callbacks OperationalCallback) er
 		return s.newChat(stmt.cmd.nameGiven, propertyMap, callbacks)
 	case "chat":
 		return s.chat(stmt.cmd.nameGiven, propertyMap, callbacks)
+	case "new-ctx":
+		return s.newContext(stmt.cmd.nameGiven, propertyMap, callbacks)
+	case "del-chat":
+		return s.deleteChat(stmt.cmd.nameGiven, callbacks)
+	case "del-ctx":
+		return s.deleteContext(stmt.cmd.nameGiven, callbacks)
+	case "del-provider":
+		return s.deleteProvider(stmt.cmd.nameGiven, callbacks)
+	case "list-chat":
+		return s.listChats(callbacks)
+	case "list-ctx":
+		return s.listContexts(callbacks)
+	case "desc-ctx":
+		return s.describeContext(stmt.cmd.nameGiven, callbacks)
+	case "desc-chat":
+		return s.describeChat(stmt.cmd.nameGiven, callbacks)
+	case "list-provider":
+		return s.listProviders(callbacks)
 	}
 
 	return errors.New("not implemented")
@@ -178,4 +217,77 @@ func (s *coreSession) chat(name string, propertyMap map[string]*property, callba
 	}
 
 	return callbacks.OnLoadChat(name, hash)
+}
+
+func (s *coreSession) newContext(name string, propertyMap map[string]*property, callbacks OperationalCallback) error {
+
+	var dir *string
+	var database *string
+	var web *string
+
+	for key, prop := range propertyMap {
+		switch key {
+		case "dir":
+			dir = &prop.prop
+		case "database":
+			database = &prop.prop
+		case "web":
+			web = &prop.prop
+		default:
+			return fmt.Errorf("invalid, unknown property: %s", key)
+		}
+	}
+
+	if name == "" {
+		return fmt.Errorf("name must be specified")
+	}
+
+	return callbacks.OnNewContext(name, dir, database, web)
+}
+
+func (s *coreSession) deleteChat(name string, callbacks OperationalCallback) error {
+	if name == "" {
+		return fmt.Errorf("name must be specified")
+	}
+	return callbacks.OnDeleteChat(name)
+}
+
+func (s *coreSession) deleteContext(name string, callbacks OperationalCallback) error {
+	if name == "" {
+		return fmt.Errorf("name must be specified")
+	}
+	return callbacks.OnDeleteContext(name)
+}
+
+func (s *coreSession) listChats(callbacks OperationalCallback) error {
+	return callbacks.OnListChats()
+}
+
+func (s *coreSession) listContexts(callbacks OperationalCallback) error {
+	return callbacks.OnListContexts()
+}
+
+func (s *coreSession) describeContext(name string, callbacks OperationalCallback) error {
+	if name == "" {
+		return fmt.Errorf("name must be specified")
+	}
+	return callbacks.OnDescribeContext(name)
+}
+
+func (s *coreSession) describeChat(name string, callbacks OperationalCallback) error {
+	if name == "" {
+		return fmt.Errorf("name must be specified")
+	}
+	return callbacks.OnDescribeChat(name)
+}
+
+func (s *coreSession) listProviders(callbacks OperationalCallback) error {
+	return callbacks.OnListProviders()
+}
+
+func (s *coreSession) deleteProvider(name string, callbacks OperationalCallback) error {
+	if name == "" {
+		return fmt.Errorf("name must be specified")
+	}
+	return callbacks.OnDeleteProvider(name)
 }
